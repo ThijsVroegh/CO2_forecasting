@@ -30,7 +30,7 @@ through to train a model and to produce a forecast.
 To run the docker file do:
 
 ```docker
-docker run -e ned_api_key -e csv_path=/data/prediction.csv --volume /data:/data emissions
+docker run -e ned_api_key -e csv_path=/data/prediction.csv --volume /data:/data ghcr.io/bschilperoort/emissionfactor-forecast
 ```
 
 Where the environmental variable `ned_api_key` should be your ned.nl API key,
