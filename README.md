@@ -27,9 +27,9 @@ These are used in forecasting of the emission factor.
 The Dockerfile contained in this reposity describes all steps you need to go
 through to train a model and to produce a forecast.
 
-This allows easy production of forecasts. Docker engine is [freely available on Linux](https://docs.docker.com/engine/install/).
+The container image allows easy production of forecasts. Docker engine is [freely available on Linux](https://docs.docker.com/engine/install/).
 
-To run the docker file do:
+To run the container image do:
 
 ```docker
 docker run -e ned_api_key -e csv_path=/data/prediction.csv --volume /data:/data ghcr.io/bschilperoort/emissionfactor-forecast
@@ -39,12 +39,14 @@ The `/data` directory is the location where the prediction file should end up.
 
 The environmental variable `ned_api_key` should be your ned.nl API key. Set this with:
 ```sh
-export ned_api_key=enter-your-key-here.
+export ned_api_key=enter-your-key-here
 ```
 More information on the NED API is available [here](https://ned.nl/nl/api).
 
 Note that for model training, historical NED data is required, but this is removed
-from the Docker image due to licensing restrictions.
+from the Docker image due to licensing restrictions. The required files are;
+ - wind, zeewind, zon, electriciteitsmix .csv files
+ - years 2021, 2022, 2023, 2024
 
 ## ToDo:
 This is a work in progress, the repository will likely be reorganized and more
