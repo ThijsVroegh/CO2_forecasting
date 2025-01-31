@@ -53,7 +53,7 @@ def request_data(
         "classification": 1 if forecast else 2,  # historic=2, forecast=1
         "activity": 1,  # Providing
         "validfrom[after]": start_date,  # from (including)
-        "validfrom[before]": end_date,  # up to (including)
+        "validfrom[strictly_before]": end_date,  # up to (excluding)
         "page": page,
     }
     response = requests.get(URL, headers=HEADERS, params=params, allow_redirects=False)
@@ -126,7 +126,7 @@ def get_data(
 
 def get_current_forecast() -> pandas.DataFrame:
     now = datetime.datetime.now()
-    start_forecast = (now - datetime.timedelta(days=1)).strftime(DATE_FORMAT)
+    start_forecast = now.strftime(DATE_FORMAT)
     end_forecast = (now + datetime.timedelta(days=7)).strftime(DATE_FORMAT)
 
     sources = ("sun", "land-wind", "sea-wind")
@@ -136,7 +136,7 @@ def get_current_forecast() -> pandas.DataFrame:
 def get_runup_data() -> pandas.DataFrame:
     now = datetime.datetime.now()
     start_runup = (now - datetime.timedelta(days=RUNUP_PERIOD)).strftime(DATE_FORMAT)
-    end_runup = (now - datetime.timedelta(days=1)).strftime(DATE_FORMAT)
+    end_runup = now.strftime(DATE_FORMAT)
 
     sources = ("mix", "sun", "land-wind", "sea-wind")
     return get_data(sources, start_runup, end_runup, forecast=False)
