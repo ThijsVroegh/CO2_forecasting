@@ -1,3 +1,6 @@
+> [!NOTE]  
+> This repository is archived. Development of this workflow is continued at [github.com/ESI-FAR/emissionfactor-nl](https://github.com/ESI-FAR/emissionfactor-nl)
+
 # Forecasting grid emission factor for the Netherlands
 
 This repo contains a workflow to produce emission factor forecasts for the Dutch
