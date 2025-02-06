@@ -1,77 +1,103 @@
-> [!NOTE]  
-> This repository is archived. Development of this workflow is continued at [github.com/ESI-FAR/emissionfactor-nl](https://github.com/ESI-FAR/emissionfactor-nl)
+# Forecasting Grid Emission Factor for the Netherlands
 
-# Forecasting grid emission factor for the Netherlands
+This project forecasts CO2 emission factors for the Dutch electricity grid 7 days ahead. It combines historical data with renewable energy forecasts to predict how "green" the electricity grid will be.
 
-This repo contains a workflow to produce emission factor forecasts for the Dutch
-electricity mix, 7 days ahead.
+## Project Overview
 
-## Model training
-Model training is performed with [AutoGluon](https://auto.gluon.ai/), using the time
-series forcasting module.
+The model uses:
+- Historical data from the past 5 years for training
+- Last 4 weeks of data for recent context
+- NED's renewable energy forecasts for the next 7 days
+- Temperature data from KNMI (optional) to capture weather effects
 
-As training data the total energy production and the energy mix's emission factor are
-used, sourced from the [Nationaal Energie Dashboard](https://ned.nl/)
-with the produced solar and wind energy as "known covariates".
+## Directory Structure
 
-<img src="model_test.png" alt="Model training test result" width="400"/>
+The project creates several directories to store data and results:
+- `data/`
+  - `historical/`: Historical training data and context data
+  - `forecasts/`: Emission factor predictions and NED renewable forecasts
+  - `downloaded/`: Raw downloaded data from NED API
+- `models/`: Trained AutoGluon models and performance metrics
+- `knmi_data/`: Temperature data from KNMI (optional)
 
-*Model training result, validation on unseen data*
+## Files Description
 
-The NED also provides forecasts for the solar and wind production.
-These are used in forecasting of the emission factor.
+### Data Collection
+- `retrieve_ned.py`: Downloads data from NED API
+  - Historical data for training (5 years)
+  - Recent data for context (4 weeks)
+  - Renewable forecasts (next 7 days)
 
-<img src="example_forecast.png" alt="Example forecast" width="400"/>
+### Model Training
+- `train_model.py`: Trains the emission factor prediction model
+  - Uses AutoGluon's time series module
+  - Creates features like time patterns, lags, rolling means
+  - Saves model performance metrics and feature importance
+  - Optional: integrates temperature data
 
-*Example forecast, for 2025-01-28 - 2025-02-04*
+### Prediction
+- `predict.py`: Generates 7-day ahead forecasts
+  - Uses recent context (4 weeks) for current trends
+  - Incorporates NED's renewable forecasts
+  - Produces predictions with confidence intervals
 
-## Reproducing results
+### Evaluation
+- `evaluate_model.py`: Assesses model performance
+  - Tests on historical data
+  - Analyzes errors by time patterns
+  - Generates detailed performance metrics
+  - Creates error analysis plots
 
-The Dockerfile contained in this reposity describes all steps you need to go
-through to train a model and to produce a forecast.
+### Visualization
+- `plot_forecast.py`: Creates forecast visualizations
+  - Plots predictions with confidence intervals
+  - Shows renewable energy context
+  - Saves plots for analysis
 
-The container image allows easy production of forecasts.
-Docker engine is [freely available on Linux](https://docs.docker.com/engine/install/).
+## Running the Project
 
-To run the container image do:
-
-```docker
-docker run \
-    -e ned_api_key \
-    --volume /local/path/to/output/dir:/data:/data \
-    ghcr.io/bschilperoort/emissionfactor-forecast
-```
-
-The `/data` directory is the location where the prediction file should end up.
-The container will also write the run-up data used in the prediction, as well as
-NED's forecast for available wind and solar energy.
-
-The environmental variable `ned_api_key` should be your ned.nl API key. Set this with:
+1. Set up your NED API key:
 ```sh
-export ned_api_key=enter-your-key-here
+export ned_api_key=your-key-here
 ```
+
+2. Run the files in this order:
+```sh
+python retrieve_ned.py    # Download data
+python train_model.py     # Train model
+python predict.py         # Make predictions
+python evaluate_model.py  # Evaluate performance
+python plot_forecast.py   # Visualize results
+```
+
+## Model Features
+
+The model uses several types of features:
+1. Temporal patterns:
+   - Hour of day (0-23)
+   - Day of week (Monday=0, Sunday=6)
+   - Month (1-12)
+   - Weekend indicator
+
+2. Renewable energy:
+   - Solar production
+   - Onshore wind
+   - Offshore wind
+
+3. Historical patterns:
+   - Recent emission factors (1h, 2h, 3h ago)
+   - Daily patterns (24h, 48h ago)
+   - Weekly patterns (168h ago)
+   - Rolling means (24h, 168h windows)
+
+4. Optional temperature data:
+   - Current temperature
+   - Temperature lags
+   - Temperature rolling means
+
+## Data Sources
+
+- Electricity data: [Nationaal Energie Dashboard](https://ned.nl/)
+- Temperature data: [KNMI](https://www.knmi.nl/) (optional)
+
 More information on the NED API is available [here](https://ned.nl/nl/api).
-
-Note that the container's ouput files will be written as root. To avoid this you
-can set the user ID, e.g.:
-```docker
-docker run \
-    -e ned_api_key \
-    --volume /local/path/to/output/dir:/data:/data \
-    --user 1000:1000 \
-    ghcr.io/bschilperoort/emissionfactor-forecast
-```
-If your user ID is 1000.
-
-## Building the container image
-
-Note that for model training, historical NED data is required, but this is removed
-from the container image due to licensing restrictions. The required files are;
- - wind, zeewind, zon, electriciteitsmix .csv files
- - years 2021, 2022, 2023, 2024
-
-These files are available from ned.nl after registering.
-
-## ToDo:
-This is a work in progress, the repository will likely be reorganized and more
-descriptive documentation needs to be added.
