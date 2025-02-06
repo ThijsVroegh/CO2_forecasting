@@ -2,8 +2,11 @@ import datetime
 import json
 import os
 from typing import Literal
+
 import pandas
 import requests
+
+from config import FORECAST_DIR, HISTORICAL_DIR, DOWNLOADED_DIR
 
 
 def get_key() -> str:
@@ -130,13 +133,134 @@ def get_current_forecast() -> pandas.DataFrame:
     end_forecast = (now + datetime.timedelta(days=7)).strftime(DATE_FORMAT)
 
     sources = ("sun", "land-wind", "sea-wind")
-    return get_data(sources, start_forecast, end_forecast, forecast=True)
+    df = get_data(sources, start_forecast, end_forecast, forecast=True)
+    
+    # Save forecast data
+    timestamp = now.strftime('%Y%m%d')  # Consistent timestamp format
+    forecast_file = FORECAST_DIR / f"forecast_{timestamp}.csv"
+    downloaded_file = DOWNLOADED_DIR / f"forecast_{timestamp}.csv"
+    df.to_csv(forecast_file)
+    df.to_csv(downloaded_file)
+    return df
 
 
 def get_runup_data() -> pandas.DataFrame:
+    """Download recent historical data for model context.
+    
+    Downloads the last 4 weeks of historical data (defined by RUNUP_PERIOD) to provide
+    recent context for the forecasting model. This includes:
+    - Electricity mix data (total volume and emission factor)
+    - Solar production
+    - Onshore wind production
+    - Offshore wind production
+    
+    The data is saved in two locations:
+    1. HISTORICAL_DIR/historical_{date}.csv
+    2. DOWNLOADED_DIR/historical_{date}.csv
+    
+    Both files contain the same combined data with all sources.
+    
+    Returns:
+        pandas.DataFrame: Combined dataframe containing recent historical data with columns:
+            - total_volume: Total electricity volume
+            - emissionfactor: CO2 emission factor
+            - volume_sun: Solar production
+            - volume_land-wind: Onshore wind production
+            - volume_sea-wind: Offshore wind production
+    
+    Raises:
+        requests.ConnectionError: If the API request fails
+        ValueError: If the API key is not found in environment variables
+    
+    Note:
+        The runup period is defined by RUNUP_PERIOD constant (default: 4 weeks)
+        This data is used to provide recent context for the forecasting model.
+    """
     now = datetime.datetime.now()
     start_runup = (now - datetime.timedelta(days=RUNUP_PERIOD)).strftime(DATE_FORMAT)
     end_runup = now.strftime(DATE_FORMAT)
 
     sources = ("mix", "sun", "land-wind", "sea-wind")
-    return get_data(sources, start_runup, end_runup, forecast=False)
+    df = get_data(sources, start_runup, end_runup, forecast=False)
+    
+    # Save historical data
+    timestamp = now.strftime('%Y%m%d')  # Consistent timestamp format
+    historical_file = HISTORICAL_DIR / f"historical_{timestamp}.csv"
+    downloaded_file = DOWNLOADED_DIR / f"historical_{timestamp}.csv"
+    df.to_csv(historical_file)
+    df.to_csv(downloaded_file)
+    return df
+
+
+def get_historical_data() -> pandas.DataFrame:
+    """Download and save historical data for model training.
+    
+    Downloads 5 years of historical data from the NED API, including:
+    - Electricity mix data (total volume and emission factor)
+    - Solar production
+    - Onshore wind production
+    - Offshore wind production
+    
+    The data is saved in two formats:
+    1. A combined CSV file containing all data columns, saved to DOWNLOADED_DIR
+    2. Separate CSV files for each source with standardized column names, saved to HISTORICAL_DIR:
+        - electriciteitsmix-{date}-uur-data.csv: Contains total volume and emission factor
+        - zon-{date}-uur-data.csv: Solar production
+        - wind-{date}-uur-data.csv: Onshore wind production
+        - zeewind-{date}-uur-data.csv: Offshore wind production
+    
+    Returns:
+        pandas.DataFrame: Combined dataframe containing all downloaded data with columns:
+            - total_volume: Total electricity volume
+            - emissionfactor: CO2 emission factor
+            - volume_sun: Solar production
+            - volume_land-wind: Onshore wind production
+            - volume_sea-wind: Offshore wind production
+    
+    Raises:
+        requests.ConnectionError: If the API request fails
+        ValueError: If the API key is not found in environment variables
+    """
+    now = datetime.datetime.now()
+    # Get 5 years of historical data
+    start_date = (now - datetime.timedelta(days=5*365)).strftime(DATE_FORMAT)
+    end_date = now.strftime(DATE_FORMAT)
+
+    print(f"Downloading data from {start_date} to {end_date}...")
+    sources = ("mix", "sun", "land-wind", "sea-wind")
+    df = get_data(sources, start_date, end_date, forecast=False)
+    
+    # Save combined data
+    timestamp = now.strftime('%Y%m%d')
+    combined_file = DOWNLOADED_DIR / f"historical_combined_{timestamp}.csv"
+    df.to_csv(combined_file)
+    print(f"Saved combined historical data to {combined_file}")
+    
+    # Save mix data with correct column names
+    if "total_volume" in df.columns:
+        mix_df = df[["total_volume", "emissionfactor"]].copy()
+        mix_df.columns = ["volume (kWh)", "emissionfactor (kg CO2/kWh)"]
+        mix_df.index.name = "validfrom (UTC)"
+        mix_df.to_csv(
+            HISTORICAL_DIR / f"electriciteitsmix-{timestamp}-uur-data.csv"
+        )
+    
+    # Save source-specific data with correct column names
+    source_names = {
+        "sun": "zon",
+        "land-wind": "wind",
+        "sea-wind": "zeewind"
+    }
+    
+    for source, name in source_names.items():
+        col = f"volume_{source}"
+        if col in df.columns:
+            source_df = df[[col]].copy()
+            source_df.columns = ["volume (kWh)"]
+            source_df.index.name = "validfrom (UTC)"
+            source_df.to_csv(
+                HISTORICAL_DIR / f"{name}-{timestamp}-uur-data.csv"
+            )
+    
+    print(f"Saved split historical data files to {HISTORICAL_DIR}")
+    return df
