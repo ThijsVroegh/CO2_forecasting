@@ -1,8 +1,6 @@
 from pathlib import Path
 from typing import Literal
-
 import pandas
-
 
 def read_predictions(directory: Path) -> pandas.DataFrame:
     df_sun = read_ned(directory.glob("zon-uur-voorspelling*.csv"), "sun")

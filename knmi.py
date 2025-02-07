@@ -2,15 +2,32 @@ import pandas as pd
 from pathlib import Path
 
 def process_knmi_data(file_path: str) -> pd.DataFrame:
+    """Process KNMI hourly weather data.
+    
+    Currently only extracts temperature data, but the file contains other potentially 
+    valuable features for future use:
+    - Q: Global radiation (solar panel efficiency)
+    - FH: Wind speed (wind turbine output)
+    - DD: Wind direction (wind turbine efficiency)
+    - N: Cloud cover (solar panel output)
+    - U: Relative humidity (overall efficiency)
+    """
     # Read the data with proper column names
+    column_names = [
+        'STN', 'YYYYMMDD', 'HH', 'DD', 'FH', 'FF', 'FX', 'T', 'T10N', 'TD',
+        'SQ', 'Q', 'DR', 'RH', 'P', 'VV', 'N', 'U', 'WW', 'IX', 'M', 'R',
+        'S', 'O', 'Y'
+    ]
+    
     df = pd.read_csv(file_path, 
                      skiprows=1,  # Skip the header row
                      delimiter=',',
                      skipinitialspace=True,
-                     names=['STN', 'YYYYMMDD', 'HH', 'T'])  # Specify column names
+                     names=column_names)
     
-    # Print column names to debug
-    print("Available columns:", df.columns.tolist())
+    # Print first few rows to debug
+    print("\nFirst few rows of raw data:")
+    print(df[['YYYYMMDD', 'HH', 'T']].head())
     
     # Convert temperature from 0.1°C to °C
     df['T'] = df['T'].astype(float) / 10.0
@@ -41,7 +58,7 @@ def process_knmi_data(file_path: str) -> pd.DataFrame:
 
 def main():
     # Define the file path
-    file_path = Path('knmi_data/result.txt')
+    file_path = Path('data/knmi_data/result.txt')
     
     try:
         # Process the data

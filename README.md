@@ -22,14 +22,44 @@ The project creates several directories to store data and results:
 
 ## Files Description
 
+### Supporting files
+- `read_ned.py`: Reads data stored on disk
+  - `read_predictions`: Reads predictions from disk
+  - `read_all`: Reads all data from disk
+  - `read_ned`: Reads data from disk and combines it into a single pandas DataFrame
+  - `read_mix_file`: Reads mix data from disk
+  - `read_production_file`: Reads production data from disk
+
+- `config.py`: Configuration for the project
+  - `HISTORICAL_DIR`: Directory for historical data
+  - `FORECAST_DIR`: Directory for forecast data
+  - `DOWNLOADED_DIR`: Directory for downloaded data
+  - `MODEL_DIR`: Directory for model data
+
+- `knmi.py`: Process KNMI temperature data
+  - Reads raw KNMI data  
+  - Saves processed data to `knmi_data/processed_temperatures.csv`  
+  
+- `correlations.py`: Analyze correlation between historical data and temperature data
+  - Reads historical data on electricity demand
+  - Reads temperature data
+  - Merges data on datetime
+  - Plots correlation between electricity demand and temperature
+
 ### Data Collection
-- `retrieve_ned.py`: Downloads data from NED API
-  - Historical data for training (5 years)
+- `retrieve_ned.py`: Downloads data with NED API
+  - Historical data for training (4 years)
   - Recent data for context (4 weeks)
   - Renewable forecasts (next 7 days)
-
+  
+- `download_historical.py`: Downloads historical data from NED API to disk  
+  - Historical data for training (4 years)
+  - Saves to `data/historical/`
+  - Uses NED API key from environment variable `ned_api_key`
+  
 ### Model Training
 - `train_model.py`: Trains the emission factor prediction model
+
   - Uses AutoGluon's time series module
   - Creates features like time patterns, lags, rolling means
   - Saves model performance metrics and feature importance
@@ -48,7 +78,7 @@ The project creates several directories to store data and results:
   - Generates detailed performance metrics
   - Creates error analysis plots
 
-### Visualization
+### Forecasting in the unknown future
 - `plot_forecast.py`: Creates forecast visualizations
   - Plots predictions with confidence intervals
   - Shows renewable energy context
@@ -63,11 +93,14 @@ export ned_api_key=your-key-here
 
 2. Run the files in this order:
 ```sh
-python retrieve_ned.py    # Download data
-python train_model.py     # Train model
-python predict.py         # Make predictions
-python evaluate_model.py  # Evaluate performance
-python plot_forecast.py   # Visualize results
+python download_historical.py # Download data
+python knmi.py                # KNMI temperature data
+python correlations.py        # Analyze correlation between historical data and    
+                              # temperature data
+python train_model.py         # Train model
+python predict.py             # Make predictions
+python evaluate_model.py      # Evaluate performance (test set)
+python plot_forecast.py       # Visualize results (unseen data)
 ```
 
 ## Model Features
@@ -90,7 +123,7 @@ The model uses several types of features:
    - Weekly patterns (168h ago)
    - Rolling means (24h, 168h windows)
 
-4. Optional temperature data:
+4. Temperature data:
    - Current temperature
    - Temperature lags
    - Temperature rolling means

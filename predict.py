@@ -58,20 +58,15 @@ def predict():
     runup_data.index = pd.to_datetime(runup_data.index)
     forecast_data.index = pd.to_datetime(forecast_data.index)
     
-    # Add all features to runup data (including lags)
+    # Add all features to both datasets
     runup_data_with_features = add_features(runup_data)
+    forecast_data_with_features = add_features(forecast_data)
     
-    # For forecast data, we can only add temporal features; lags and rolling
-    # means are not available for future timestamps
-    forecast_data_with_features = forecast_data.copy()
-    
-    # Add only temporal features to forecast data
-    forecast_data_with_features['hour'] = pd.to_datetime(forecast_data.index).hour
-    forecast_data_with_features['dayofweek'] = pd.to_datetime(forecast_data.index).dayofweek
-    forecast_data_with_features['month'] = pd.to_datetime(forecast_data.index).month
-    forecast_data_with_features['is_weekend'] = (
-        pd.to_datetime(forecast_data.index).dayofweek >= 5
-    ).astype(int)
+    # Debug: print features in forecast data
+    print("\nFeatures in forecast data:")
+    print(forecast_data_with_features.columns.tolist())
+    print("\nFirst few rows of forecast data:")
+    print(forecast_data_with_features.head())
     
     # Convert to AutoGluon format
     gluon_runup = gluonify(runup_data_with_features)
@@ -80,7 +75,7 @@ def predict():
     # Load model and make prediction
     predictor = TimeSeriesPredictor.load(str(MODEL_DIR))
     prediction = predictor.predict(gluon_runup, known_covariates=gluon_forecast)
-    
+            
     # Save results
     date = datetime.datetime.now().strftime("%Y-%m-%d_%H%M")
     prediction.to_csv(FORECAST_DIR / f"prediction_{date}.csv")

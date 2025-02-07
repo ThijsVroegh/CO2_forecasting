@@ -222,8 +222,8 @@ def get_historical_data() -> pandas.DataFrame:
         ValueError: If the API key is not found in environment variables
     """
     now = datetime.datetime.now()
-    # Get 5 years of historical data
-    start_date = (now - datetime.timedelta(days=5*365)).strftime(DATE_FORMAT)
+    # Get 4 years of historical data
+    start_date = (now - datetime.timedelta(days=4*365)).strftime(DATE_FORMAT)
     end_date = now.strftime(DATE_FORMAT)
 
     print(f"Downloading data from {start_date} to {end_date}...")

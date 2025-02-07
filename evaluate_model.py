@@ -50,29 +50,65 @@ def load_test_data(use_full_context=False):
             context_data = ned_data[-5*7*24:-7*24].copy()
             print("Using last 4 weeks as context")
     
-    # Add all features to context data (including lags)
+    # Add features to context data (including emission factor features)
     context_data = add_features(context_data)
+    print("\nContext data features:")
+    print("Emission factor features:", [col for col in context_data.columns if 'emissionfactor' in col])
     
-    # For test data, we can only use features that would be known
-    # at prediction time (temporal features and renewable volumes)
+    # For test data, we can only use features that are known at prediction time
     test_data = ned_data[-7*24:].copy()
-    test_data_with_features = test_data.copy()
+    test_data_with_features = add_features(test_data)
     
-    # Add temporal features (these are known for future dates)
-    test_data_with_features['hour'] = pd.to_datetime(test_data.index).hour
-    test_data_with_features['dayofweek'] = pd.to_datetime(test_data.index).dayofweek
-    test_data_with_features['month'] = pd.to_datetime(test_data.index).month
-    test_data_with_features['is_weekend'] = (
-        pd.to_datetime(test_data.index).dayofweek >= 5
-    ).astype(int)
+    print("\nTest data features:")
+    print(test_data_with_features.columns.tolist())
     
-    # Extract known covariates (temporal features and renewable volumes forecasted by NED)
+    # Extract known covariates (all features that will be known during prediction)
     known_features = [
+        # Renewable energy volumes
         'volume_sun', 'volume_land-wind', 'volume_sea-wind',
-        'hour', 'dayofweek', 'month', 'is_weekend'
+        # Basic temporal features
+        'hour', 'dayofweek', 'month', 'is_weekend',
+        # Cyclical features - Day of year
+        'day_of_year_sin', 'day_of_year_cos',
+        # Cyclical features - Week of year
+        'week_of_year_sin', 'week_of_year_cos',
+        # Cyclical features - Hour
+        'hour_sin', 'hour_cos',
+        # Cyclical features - Day of week
+        'dayofweek_sin', 'dayofweek_cos',
+        # Cyclical features - Month
+        'month_sin', 'month_cos',
+        # Cyclical features - Quarter
+        'quarter_sin', 'quarter_cos',
+        # Temperature features
+        'temperature_celsius', 'temperature_change_1h', 'temperature_change_24h',
+        # Temperature lag features
+        *[f'temperature_lag_{lag}h' for lag in [1, 8, 9, 10, 20, 21, 22, 23, 24]],
+        # Temperature rolling means
+        *[f'temperature_rolling_mean_{window}h' for window in [24, 168]],
+        # Holiday features
+        'is_holiday', 'is_holiday_adjacent',
+        # Vacation features
+        'is_school_vacation', 'is_summer_vacation', 'vacation_type',
+        # Interaction features
+        'sun_hour', 'wind_hour',
+        # Squared features
+        'temperature_squared', 'sun_squared', 'wind_squared',
+        # Percentage features
+        'renewable_percentage'
     ]
 
+    # Create covariates DataFrame with all known features
     covariates = test_data_with_features[known_features].copy()
+    
+    # Safety check for known_covariates (this is what matters)
+    covariate_cols = covariates.columns
+    ef_features = [col for col in covariate_cols if 'emissionfactor' in col]
+    if ef_features:
+        raise ValueError(f"Found emission factor features in known_covariates: {ef_features}")
+    
+    print("\nKnown covariates for prediction:")
+    print(covariate_cols.tolist())
     
     print(f"Context period: {context_data.index[0]} to {context_data.index[-1]}")
     print(f"Test period: {test_data.index[0]} to {test_data.index[-1]}")
@@ -80,6 +116,7 @@ def load_test_data(use_full_context=False):
     print(f"Temporal features: {sum(col in ['hour', 'dayofweek', 'month', 'is_weekend'] for col in context_data.columns)}")
     print(f"Lag features: {sum('lag' in col for col in context_data.columns)}")
     print(f"Rolling mean features: {sum('rolling_mean' in col for col in context_data.columns)}")
+    print(f"Temperature features: {sum(col in ['temperature_celsius', 'temperature_change_1h', 'temperature_change_24h'] for col in context_data.columns)}")
     print(f"Known covariates in test data: {known_features}")
     
     return context_data, test_data, covariates, test_data_with_features
@@ -101,7 +138,16 @@ def evaluate_forecast(use_full_context=False):
     """
     # Load data
     context_data, test_data, known_covariates, test_data_with_features = load_test_data(use_full_context)
-    prev_week = context_data[-7*24:].copy()
+    
+    # Verify features before prediction
+    print("\nFeatures being used for prediction:")
+    print("Context features:", context_data.columns.tolist())
+    print("\nKnown covariates for prediction:", known_covariates.columns.tolist())
+    
+    # Verify all required features are present
+    missing_features = set(known_covariates.columns) - set(test_data_with_features.columns)
+    if missing_features:
+        raise ValueError(f"Missing features in test data: {missing_features}")
     
     # Make prediction
     predictor = TimeSeriesPredictor.load(str(MODEL_DIR))
@@ -125,6 +171,7 @@ def evaluate_forecast(use_full_context=False):
         'predicted': predicted_values,
         'absolute_error': predicted_values - actual_values,
         'percentage_error': 100 * (predicted_values - actual_values) / actual_values,
+        'actual_diff': test_data['emissionfactor'].diff().values,
         # Known covariates - renewable volumes
         'volume_sun': test_data['volume_sun'].values,
         'volume_land-wind': test_data['volume_land-wind'].values,
@@ -133,6 +180,10 @@ def evaluate_forecast(use_full_context=False):
         'hour': test_data_with_features['hour'].values,
         'dayofweek': test_data_with_features['dayofweek'].values,
         'is_weekend': test_data_with_features['is_weekend'].values,
+        # Holiday and vacation features
+        'is_holiday': test_data_with_features['is_holiday'].values,
+        'is_school_vacation': test_data_with_features['is_school_vacation'].values,
+        'is_summer_vacation': test_data_with_features['is_summer_vacation'].values,
         # Temperature (if available)
         'temperature': test_data_with_features.get('temperature_celsius', pd.Series([None] * len(test_data))).values
     }, index=test_data.index)
@@ -214,11 +265,47 @@ def evaluate_forecast(use_full_context=False):
     # Add temperature analysis if available
     if 'temperature' in error_tbl.columns and not error_tbl['temperature'].isna().all():
         print("\nTemperature Analysis:")
-        temp_bins = pd.qcut(error_tbl['temperature'], q=4)
-        temp_errors = error_tbl.groupby(temp_bins)['absolute_error'].mean()
-        print("Error by temperature quartile:")
-        for bin_label, error in temp_errors.items():
-            print(f"  {bin_label}: {error:.4f}")
+        
+        # Create temperature bins with observed=True to handle the warning
+        temp_bins = pd.qcut(error_tbl['temperature'], q=4, labels=[
+            'Very Cold', 'Cold', 'Warm', 'Very Warm'
+        ])
+        
+        # Calculate statistics separately
+        temp_means = error_tbl.groupby(temp_bins, observed=True)['absolute_error'].mean()
+        temp_stds = error_tbl.groupby(temp_bins, observed=True)['absolute_error'].std()
+        temp_counts = error_tbl.groupby(temp_bins, observed=True)['absolute_error'].count()
+        
+        # Get temperature ranges
+        temp_ranges = pd.qcut(error_tbl['temperature'], q=4, retbins=True)[1]
+        
+        print("\nError by temperature range:")
+        for idx in temp_means.index:
+            temp_range = f"{temp_ranges[list(temp_means.index).index(idx)]:.1f}°C to {temp_ranges[list(temp_means.index).index(idx)+1]:.1f}°C"
+            print(f"  {idx:9} ({temp_range:20}): "
+                  f"MAE = {temp_means[idx]:.4f} ± "
+                  f"{temp_stds[idx]:.4f} "
+                  f"(n={int(temp_counts[idx])})")
+        
+        # Add correlation analysis
+        temp_corr = error_tbl[['temperature', 'absolute_error']].corr().iloc[0,1]
+        print(f"\nCorrelation between temperature and absolute error: {temp_corr:.3f}")
+    
+    # Add difference analysis to the summary
+    print("\nDifference Analysis:")
+    print(f"Mean Absolute Diff: {error_tbl['actual_diff'].abs().mean():.4f}")
+    corr = error_tbl[['actual_diff', 'absolute_error']].corr().iloc[0,1]
+    print(f"Correlation between difference and error: {corr:.3f}")
+    
+    # Add holiday/vacation analysis
+    print("\nHoliday Analysis:")
+    print(f"Holiday MAE: {error_tbl[error_tbl['is_holiday']==1]['absolute_error'].abs().mean():.4f}")
+    print(f"Non-Holiday MAE: {error_tbl[error_tbl['is_holiday']==0]['absolute_error'].abs().mean():.4f}")
+    
+    print("\nVacation Analysis:")
+    print(f"School Vacation MAE: {error_tbl[error_tbl['is_school_vacation']==1]['absolute_error'].abs().mean():.4f}")
+    print(f"Non-Vacation MAE: {error_tbl[error_tbl['is_school_vacation']==0]['absolute_error'].abs().mean():.4f}")
+    print(f"Summer Vacation MAE: {error_tbl[error_tbl['is_summer_vacation']==1]['absolute_error'].abs().mean():.4f}")
     
     return test_data, prediction
 
