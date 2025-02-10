@@ -73,7 +73,7 @@ def main():
         print(df['temperature_celsius'].describe())
         
         # Save the processed data
-        df.to_csv('knmi_data/processed_temperatures.csv', index=False)
+        df.to_csv('data/knmi_data/processed_temperatures.csv', index=False)
         print("\nData saved to 'knmi_data/processed_temperatures.csv'")
         
     except FileNotFoundError:
