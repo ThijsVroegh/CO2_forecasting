@@ -9,186 +9,187 @@ import read_ned
 from train_model import gluonify, add_features
 from config import MODEL_DIR, HISTORICAL_DIR, TRAINING_DAYS
 
-from sklearn.metrics import mean_squared_error, r2_score, root_mean_squared_error,mean_absolute_error, mean_absolute_percentage_error
+from sklearn.metrics import mean_squared_error, r2_score, root_mean_squared_error, mean_absolute_error, mean_absolute_percentage_error
 from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 
-def backtest_evaluate(context_data, prediction_length=7*24, num_windows=3):
-    """Perform backtesting evaluation using multiple windows.
+def load_test_data(use_full_context=False):
+    """Load historical data as test set.
     
     Args:
-        context_data: DataFrame containing the full historical data
-        prediction_length: Number of time steps to predict (default: 1 week of hourly data)
-        num_windows: Number of validation windows to use
-        
-    Returns:
-        dict: Aggregated metrics across all windows
+        use_full_context: If True, use all available historical data as context.
+                         If False, use only last 4 weeks as context.
     """
-    # Calculate window parameters
-    total_length = len(context_data)
-    window_length = prediction_length
+    ned_data = read_ned.read_all(HISTORICAL_DIR)
+    ned_data.index = pd.to_datetime(ned_data.index)
     
-    # Initialize storage for metrics across windows
-    window_metrics = []
-    all_predictions = []
-    all_actuals = []
+    # Add alpha=0.05 for 95% confidence interval
+    plot_pacf(ned_data.emissionfactor, lags=60, alpha=0.05)
+    plt.savefig(MODEL_DIR / 'pacf_analysis.png')
+    plt.close()
     
-    # Generate windows from newest to oldest
-    for window_idx in range(num_windows):
-        print(f"\n=== Evaluating Window {window_idx + 1}/{num_windows} ===")
-        
-        # Calculate window boundaries
-        end_idx = total_length - (window_idx * window_length)
-        start_idx = end_idx - window_length
-        
-        # Extract test data for this window
-        test_data = context_data[start_idx:end_idx].copy()
-        
-        # Use data before the test window as context
-        if window_idx == num_windows - 1:
-            # For the last (oldest) window, use all available prior data
-            context_window = context_data[:start_idx].copy()
+    if TRAINING_DAYS is not None:
+        print(f"Using {TRAINING_DAYS} days of historical data")
+        if use_full_context:
+            # Use all available data within TRAINING_DAYS as context
+            cutoff_date = ned_data.index[-1] - pd.Timedelta(days=TRAINING_DAYS)
+            context_data = ned_data[
+                (ned_data.index >= cutoff_date) & 
+                (ned_data.index < ned_data.index[-7*24])
+            ].copy()
+            print("Using all available data as context within training period")
         else:
-            # For other windows, use 4 weeks of context
-            context_window = context_data[max(0, start_idx-4*7*24):start_idx].copy()
-            
-        # Add features to both context and test data
-        context_window = add_features(context_window)
-        test_data_with_features = add_features(test_data)
-        
-        # Extract known covariates for test period
-        known_features = [
-            'volume_sun', 'volume_land-wind', 'volume_sea-wind',
-            'hour', 'dayofweek', 'month', 'is_weekend',
-            'day_of_year_sin', 'day_of_year_cos',
-            'week_of_year_sin', 'week_of_year_cos',
-            'hour_sin', 'hour_cos',
-            'dayofweek_sin', 'dayofweek_cos',
-            'month_sin', 'month_cos',
-            'quarter_sin', 'quarter_cos',
-            'temperature_celsius', 'temperature_change_1h', 'temperature_change_24h',
-            *[f'temperature_lag_{lag}h' for lag in [1, 8, 9, 10, 20, 21, 22, 23, 24]],
-            *[f'temperature_rolling_mean_{window}h' for window in [24, 168]],
-            'is_holiday', 'is_holiday_adjacent',
-            'is_school_vacation', 'is_summer_vacation', 'vacation_type'
-        ]
-        
-        covariates = test_data_with_features[known_features].copy()
-        
-        # Make prediction
-        predictor = TimeSeriesPredictor.load(str(MODEL_DIR))
-        gluon_context = gluonify(context_window)
-        gluon_covariates = gluonify(covariates)
-        prediction = predictor.predict(gluon_context, known_covariates=gluon_covariates)
-        
-        # Store predictions and actuals
-        mean_col = [col for col in prediction.columns if 'mean' in col.lower()][0]
-        all_predictions.extend(prediction[mean_col].values)
-        all_actuals.extend(test_data['emissionfactor'].values)
-        
-        # Calculate metrics for this window
-        window_metrics.append({
-            'window': window_idx + 1,
-            'start_date': test_data.index[0],
-            'end_date': test_data.index[-1],
-            'rmse': root_mean_squared_error(
-                test_data['emissionfactor'].values,
-                prediction[mean_col].values
-            ),
-            'mae': mean_absolute_error(
-                test_data['emissionfactor'].values,
-                prediction[mean_col].values
-            ),
-            'r2': r2_score(
-                test_data['emissionfactor'].values,
-                prediction[mean_col].values
-            )
-        })
-        
-        # Generate visualization for this window
-        plot_window_analysis(
-            test_data,
-            prediction,
-            test_data_with_features,
-            window_idx + 1,
-            window_metrics[-1]['rmse']
-        )
+            # Use only last 4 weeks as context
+            context_data = ned_data[-5*7*24:-7*24].copy()
+            print("Using last 4 weeks as context")
+    else:
+        # Original behavior when TRAINING_DAYS is None
+        if use_full_context:
+            context_data = ned_data[:-7*24].copy()
+            print("Using full historical data as context")
+        else:
+            context_data = ned_data[-5*7*24:-7*24].copy()
+            print("Using last 4 weeks as context")
     
-    # Convert window metrics to DataFrame for aggregation
-    metrics_df = pd.DataFrame(window_metrics)
+    # Add features to context data (including emission factor features)
+    context_data = add_features(context_data)
+    print("\nContext data features:")
+    print("Emission factor features:", [col for col in context_data.columns if 'emissionfactor' in col])
     
-    # Calculate mean and median metrics across windows
-    mean_metrics = metrics_df[['rmse', 'mae', 'r2']].mean()
-    median_metrics = metrics_df[['rmse', 'mae', 'r2']].median()
+    # test data
+    test_data = ned_data[-7*24:].copy()
+    test_data_with_features = add_features(test_data)       
     
-    # Calculate overall metrics across all predictions
-    aggregate_metrics = {
-        'overall_rmse': root_mean_squared_error(all_actuals, all_predictions),
-        'overall_mae': mean_absolute_error(all_actuals, all_predictions),
-        'overall_r2': r2_score(all_actuals, all_predictions),
-        'mean_window_rmse': mean_metrics['rmse'],
-        'mean_window_mae': mean_metrics['mae'],
-        'mean_window_r2': mean_metrics['r2'],
-        'median_window_rmse': median_metrics['rmse'],
-        'median_window_mae': median_metrics['mae'],
-        'median_window_r2': median_metrics['r2'],
-        'window_metrics': window_metrics
-    }
-    
-    # Save metrics to file
-    timestamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')    
-    
-    # Create a dictionary with all metrics
-    # Save aggregate metrics
-    aggregate_df = pd.DataFrame({
-        'metric': [
-            'overall_rmse', 'overall_mae', 'overall_r2',
-            'mean_window_rmse', 'mean_window_mae', 'mean_window_r2',
-            'median_window_rmse', 'median_window_mae', 'median_window_r2'
-        ],
-        'value': [
-            aggregate_metrics['overall_rmse'],
-            aggregate_metrics['overall_mae'],
-            aggregate_metrics['overall_r2'],
-            aggregate_metrics['mean_window_rmse'],
-            aggregate_metrics['mean_window_mae'],
-            aggregate_metrics['mean_window_r2'],
-            aggregate_metrics['median_window_rmse'],
-            aggregate_metrics['median_window_mae'],
-            aggregate_metrics['median_window_r2']
-        ]
-    })
-    
-    # Save individual window metrics
-    window_metrics_df = pd.DataFrame(window_metrics)
-    
-    # Save both DataFrames to CSV
-    metrics_base_path = MODEL_DIR / f'backtest_metrics_{timestamp}'
-    aggregate_df.to_csv(f'{metrics_base_path}_aggregate.csv', index=False)
-    window_metrics_df.to_csv(f'{metrics_base_path}_windows.csv', index=False)
-    
-    # Print summary
-    print("\n=== Backtesting Summary ===")
-    print(f"Overall RMSE: {aggregate_metrics['overall_rmse']:.4f}")
-    print(f"Overall MAE: {aggregate_metrics['overall_mae']:.4f}")
-    print(f"Overall R²: {aggregate_metrics['overall_r2']:.4f}")
-    print("\nWindow-specific metrics:")
-    for metrics in window_metrics:
-        print(f"\nWindow {metrics['window']}:")
-        print(f"  Period: {metrics['start_date']} to {metrics['end_date']}")
-        print(f"  RMSE: {metrics['rmse']:.4f}")
-        print(f"  MAE: {metrics['mae']:.4f}")
-        print(f"  R²: {metrics['r2']:.4f}")
-    
-    return aggregate_metrics
+    # Extract known covariates, i.e. all features that will be known during prediction/ forecasting 
+    # horizon
+    known_features = [
+        # Renewable energy volumes
+        'volume_sun', 'volume_land-wind', 'volume_sea-wind',
+        # Basic temporal features
+        'hour', 'dayofweek', 'month', 'is_weekend',
+        # Cyclical features - Day of year
+        'day_of_year_sin', 'day_of_year_cos',
+        # Cyclical features - Week of year
+        'week_of_year_sin', 'week_of_year_cos',
+        # Cyclical features - Hour
+        'hour_sin', 'hour_cos',
+        # Cyclical features - Day of week
+        'dayofweek_sin', 'dayofweek_cos',
+        # Cyclical features - Month
+        'month_sin', 'month_cos',
+        # Cyclical features - Quarter
+        'quarter_sin', 'quarter_cos',
+        # Temperature features
+        'temperature_celsius', 'temperature_change_1h', 'temperature_change_24h',
+        # Temperature lag features
+        *[f'temperature_lag_{lag}h' for lag in [1, 8, 9, 10, 20, 21, 22, 23, 24]],
+        # Temperature rolling means
+        *[f'temperature_rolling_mean_{window}h' for window in [24, 168]],
+        # Holiday features
+        'is_holiday', 'is_holiday_adjacent',
+        # Vacation features
+        'is_school_vacation', 'is_summer_vacation', 'vacation_type',
+        # # Interaction features
+        # 'sun_hour', 'wind_hour',
+        # # Squared features
+        # 'temperature_squared', 'sun_squared', 'wind_squared',
+        # # Percentage features
+        # 'renewable_percentage'
+    ]
 
-def plot_window_analysis(test_data, prediction, test_data_with_features, window_num, rmse):
-    """Generate detailed analysis plot for a specific window."""
+    
+    # Create covariates DataFrame with all known features
+    covariates = test_data_with_features[known_features].copy()
+    
+    # Safety check for known_covariates
+    covariate_cols = covariates.columns
+    ef_features = [col for col in covariate_cols if 'emissionfactor' in col]
+    if ef_features:
+        raise ValueError(f"Found emission factor features in known_covariates: {ef_features}")
+       
+    print(f"Context period: {context_data.index[0]} to {context_data.index[-1]}")
+    print(f"Test period: {test_data.index[0]} to {test_data.index[-1]}")
+    print("\nFeature counts in context data:")
+    print(f"Temporal features: {sum(col in ['hour', 'dayofweek', 'month', 'is_weekend'] for col in context_data.columns)}")
+    print(f"Lag features: {sum('lag' in col for col in context_data.columns)}")
+    print(f"Rolling mean features: {sum('rolling_mean' in col for col in context_data.columns)}")
+    print(f"Temperature features: {sum(col in ['temperature_celsius', 'temperature_change_1h', 'temperature_change_24h'] for col in context_data.columns)}")
+    
+    print(f"Known covariates in test data: {known_features}")
+    
+    return context_data, test_data, covariates, test_data_with_features
+
+def evaluate_forecast(use_full_context=False):
+    """Generate and evaluate forecast for the test period.
+    
+    Evaluates model performance by:
+    1. Making predictions using context data and known covariates
+    2. Analyzing errors across different temporal patterns
+    3. Visualizing predictions with renewable energy context
+    
+    Args:
+        use_full_context: If True, use all historical data as context
+                         If False, use only last 4 weeks
+    
+    Returns:
+        tuple: (test_data, prediction) for further analysis if needed
+    """
+    # Load data
+    context_data, test_data, known_covariates, test_data_with_features = load_test_data(use_full_context)
+    
+    # Verify features before prediction
+    print("\nFeatures being used for prediction:")
+    print("Context features:", context_data.columns.tolist())
+    print("\nKnown covariates for prediction:", known_covariates.columns.tolist())
+    
+    # Verify all required features are present
+    missing_features = set(known_covariates.columns) - set(test_data_with_features.columns)
+    if missing_features:
+        raise ValueError(f"Missing features in test data: {missing_features}")
+    
+    # Make prediction
+    predictor = TimeSeriesPredictor.load(str(MODEL_DIR))
+    gluon_context = gluonify(context_data)
+    gluon_covariates = gluonify(known_covariates)
+    prediction = predictor.predict(gluon_context, known_covariates = gluon_covariates)
+    
     # Get prediction columns
     mean_col = [col for col in prediction.columns if 'mean' in col.lower()][0]
     quantile_10 = [col for col in prediction.columns if '0.1' in col][0]
     quantile_90 = [col for col in prediction.columns if '0.9' in col][0]
     
-    # Create figure
+    # Calculate errors
+    actual_values = test_data['emissionfactor'].values
+    predicted_values = prediction[mean_col].values
+    rmse = root_mean_squared_error(actual_values, predicted_values)
+    
+    # Create comprehensive error analysis table
+    error_tbl = pd.DataFrame({
+        'actual': actual_values,
+        'predicted': predicted_values,
+        'absolute_error': predicted_values - actual_values,
+        'percentage_error': 100 * (predicted_values - actual_values) / actual_values,
+        'actual_diff': test_data['emissionfactor'].diff().values,
+        # Known covariates - renewable volumes
+        'volume_sun': test_data['volume_sun'].values,
+        'volume_land-wind': test_data['volume_land-wind'].values,
+        'volume_sea-wind': test_data['volume_sea-wind'].values,
+        # Known covariates - temporal features
+        'hour': test_data_with_features['hour'].values,
+        'dayofweek': test_data_with_features['dayofweek'].values,
+        'is_weekend': test_data_with_features['is_weekend'].values,
+        # Holiday and vacation features
+        'is_holiday': test_data_with_features['is_holiday'].values,
+        'is_school_vacation': test_data_with_features['is_school_vacation'].values,
+        'is_summer_vacation': test_data_with_features['is_summer_vacation'].values,
+        # Temperature (if available)
+        'temperature': test_data_with_features.get('temperature_celsius', pd.Series([None] * len(test_data))).values
+    }, index=test_data.index)
+    
+    # Generate timestamp for all saved files
+    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
+    context_type = "full_context" if use_full_context else "4weeks_context"
+    
+    # Plot 1: Detailed Error Analysis
     fig = plt.figure(figsize=(15, 15))
     gs = plt.GridSpec(3, 1, height_ratios=[2, 1, 1])
     
@@ -202,21 +203,24 @@ def plot_window_analysis(test_data, prediction, test_data_with_features, window_
                     prediction[quantile_10], 
                     prediction[quantile_90],
                     alpha=0.2, color='red', label='90% Confidence')
+    ax1.plot(test_data.index, error_tbl['absolute_error'], 
+            label='Absolute Error', color='gray', linestyle='--')
     ax1.set_ylabel('Emission Factor (kgCO2eq/kWh)')
+    
     # Calculate additional metrics
     mae = mean_absolute_error(test_data['emissionfactor'].values, prediction[mean_col].values)
     mape = mean_absolute_percentage_error(test_data['emissionfactor'].values, prediction[mean_col].values) * 100  # Convert to percentage
     r2 = r2_score(test_data['emissionfactor'].values, prediction[mean_col].values)
     
-    ax1.set_title(f'Window {window_num} Analysis\nRMSE: {rmse:.4f}, MAE: {mae:.4f}, MAPE: {mape:.1f}%, R²: {r2:.3f}')
+    ax1.set_title(f'Prediction Analysis (RMSE: {rmse:.4f}, MAE: {mae:.4f}, MAPE: {mape:.1f}%, R²: {r2:.3f}')
     ax1.grid(True, alpha=0.3)
-    ax1.legend()
-    
+    ax1.legend()      
+   
     # Middle panel: Renewable Energy
     ax2 = fig.add_subplot(gs[1])
     for col in ['volume_sun', 'volume_land-wind', 'volume_sea-wind']:
         ax2.plot(test_data.index, 
-                test_data[col] / test_data[col].max(),
+                error_tbl[col] / error_tbl[col].max(),
                 label=f'{col} (normalized)', alpha=0.6)
     ax2.set_ylabel('Normalized Production')
     ax2.grid(True, alpha=0.3)
@@ -224,12 +228,8 @@ def plot_window_analysis(test_data, prediction, test_data_with_features, window_
     
     # Bottom panel: Error Patterns
     ax3 = fig.add_subplot(gs[2])
-    absolute_errors = abs(test_data['emissionfactor'].values - prediction[mean_col].values)
-    hourly_errors = pd.DataFrame({
-        'hour': test_data_with_features['hour'],
-        'error': absolute_errors
-    }).groupby('hour')['error'].mean()
-    
+    # Plot hourly error pattern
+    hourly_errors = error_tbl.groupby('hour')['absolute_error'].mean()
     ax3.plot(hourly_errors.index, hourly_errors.values, 
             label='Mean Hourly Error', color='purple')
     ax3.set_xlabel('Hour of Day')
@@ -238,21 +238,90 @@ def plot_window_analysis(test_data, prediction, test_data_with_features, window_
     ax3.legend()
     
     plt.tight_layout()
-    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
     plt.savefig(
-        MODEL_DIR / f'window_{window_num}_analysis_{timestamp}.png',
+        MODEL_DIR / f'detailed_analysis_{context_type}_{timestamp}.png',
         dpi=300, bbox_inches='tight'
     )
     plt.close()
+    
+    # Save detailed error analysis
+    error_analysis = pd.DataFrame({
+        'Hourly_Error': error_tbl.groupby('hour')['absolute_error'].mean(),
+        'Daily_Error': error_tbl.groupby('dayofweek')['absolute_error'].mean(),
+        'Weekend_Error': error_tbl.groupby('is_weekend')['absolute_error'].mean(),
+        'Hourly_RMSE': np.sqrt(error_tbl.groupby('hour')['absolute_error'].apply(lambda x: (x**2).mean())),
+        'Daily_RMSE': np.sqrt(error_tbl.groupby('dayofweek')['absolute_error'].apply(lambda x: (x**2).mean())),
+    })
+    error_analysis.to_csv(MODEL_DIR / f'error_analysis_{context_type}_{timestamp}.csv')
+    
+    # Print comprehensive summary
+    print("\nError Analysis Summary:")
+    print(f"Overall RMSE: {rmse:.4f}")
+    print(f"Mean Absolute Error: {error_tbl['absolute_error'].abs().mean():.4f}")
+    print(f"Mean Percentage Error: {error_tbl['percentage_error'].mean():.2f}%")
+    print(f"\nTemporal Patterns:")
+    print(f"Best Hour: {hourly_errors.idxmin()} ({hourly_errors.min():.4f})")
+    print(f"Worst Hour: {hourly_errors.idxmax()} ({hourly_errors.max():.4f})")
+    print(f"Weekday MAE: {error_tbl[error_tbl['is_weekend']==0]['absolute_error'].abs().mean():.4f}")
+    print(f"Weekend MAE: {error_tbl[error_tbl['is_weekend']==1]['absolute_error'].abs().mean():.4f}")
+    
+    # Add temperature analysis if available
+    if 'temperature' in error_tbl.columns and not error_tbl['temperature'].isna().all():
+        print("\nTemperature Analysis:")
+        
+        # Create temperature bins with observed=True to handle the warning
+        temp_bins = pd.qcut(error_tbl['temperature'], q=4, labels=[
+            'Very Cold', 'Cold', 'Warm', 'Very Warm'
+        ])
+        
+        # Calculate statistics separately
+        temp_means = error_tbl.groupby(temp_bins, observed=True)['absolute_error'].mean()
+        temp_stds = error_tbl.groupby(temp_bins, observed=True)['absolute_error'].std()
+        temp_counts = error_tbl.groupby(temp_bins, observed=True)['absolute_error'].count()
+        
+        # Get temperature ranges
+        temp_ranges = pd.qcut(error_tbl['temperature'], q=4, retbins=True)[1]
+        
+        print("\nError by temperature range:")
+        for idx in temp_means.index:
+            temp_range = f"{temp_ranges[list(temp_means.index).index(idx)]:.1f}°C to {temp_ranges[list(temp_means.index).index(idx)+1]:.1f}°C"
+            print(f"  {idx:9} ({temp_range:20}): "
+                  f"MAE = {temp_means[idx]:.4f} ± "
+                  f"{temp_stds[idx]:.4f} "
+                  f"(n={int(temp_counts[idx])})")
+        
+        # Add correlation analysis
+        temp_corr = error_tbl[['temperature', 'absolute_error']].corr().iloc[0,1]
+        print(f"\nCorrelation between temperature and absolute error: {temp_corr:.3f}")
+    
+    # Add difference analysis to the summary
+    print("\nDifference Analysis:")
+    print(f"Mean Absolute Diff: {error_tbl['actual_diff'].abs().mean():.4f}")
+    corr = error_tbl[['actual_diff', 'absolute_error']].corr().iloc[0,1]
+    print(f"Correlation between difference and error: {corr:.3f}")
+    
+    # Add holiday/vacation analysis
+    print("\nHoliday Analysis:")
+    print(f"Holiday MAE: {error_tbl[error_tbl['is_holiday']==1]['absolute_error'].abs().mean():.4f}")
+    print(f"Non-Holiday MAE: {error_tbl[error_tbl['is_holiday']==0]['absolute_error'].abs().mean():.4f}")
+    
+    print("\nVacation Analysis:")
+    print(f"School Vacation MAE: {error_tbl[error_tbl['is_school_vacation']==1]['absolute_error'].abs().mean():.4f}")
+    print(f"Non-Vacation MAE: {error_tbl[error_tbl['is_school_vacation']==0]['absolute_error'].abs().mean():.4f}")
+    print(f"Summer Vacation MAE: {error_tbl[error_tbl['is_summer_vacation']==1]['absolute_error'].abs().mean():.4f}")
+    
+    return test_data, prediction
 
 if __name__ == "__main__":
     try:
-        # Load the full context data
-        ned_data = read_ned.read_all(HISTORICAL_DIR)
-        ned_data.index = pd.to_datetime(ned_data.index)
+        # First evaluate with 4 weeks context
+        print("\n=== Evaluating with 4 weeks context ===")
+        test_data, prediction = evaluate_forecast(use_full_context=False)
         
-        # Perform backtesting evaluation
-        metrics = backtest_evaluate(ned_data, prediction_length=7*24, num_windows=3)
+        # Then evaluate with full historical context
+        print("\n=== Evaluating with full historical context ===")
+        test_data, prediction = evaluate_forecast(use_full_context=True)
         
     except Exception as e:
-        print(f"Error during backtesting: {str(e)}")
+        print(f"Error during evaluation: {str(e)}") 
+        
