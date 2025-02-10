@@ -237,7 +237,7 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
             [f'temperature_lag_{lag}h' for lag in temp_lags] +
             [f'temperature_rolling_mean_{window}h' for window in temp_windows]
         )
-        df[temp_features] = df[temp_features].fillna(method='ffill').fillna(method='bfill')
+        df[temp_features] = df[temp_features].ffill().bfill()
         
     except Exception as e:
         print(f"Warning: Could not load temperature data: {str(e)}")
@@ -361,14 +361,15 @@ if __name__ == "__main__":
         ],
         path=str(MODEL_DIR)
     ).fit(
-        gluon_train_data,
-        #time_limit=300, # 100 seconds
+        train_data=gluon_train_data,        
         presets="best_quality", #best quality model
         verbosity=4,
-        time_limit=1000,
-        #excluded_model_types=["Chronos", "DeepAR", "TiDE"]
+        time_limit=1000, # 100 seconds
+        num_val_windows=3, # Used to select best model during training
+        excluded_model_types=["Chronos", "DeepAR", "TiDE"]
     )
     
+
     leaderboard = predictor.leaderboard(gluon_train_data, silent=True)
     print("\nModel Leaderboard:")
     print(leaderboard)
