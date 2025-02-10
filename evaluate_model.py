@@ -55,14 +55,12 @@ def load_test_data(use_full_context=False):
     print("\nContext data features:")
     print("Emission factor features:", [col for col in context_data.columns if 'emissionfactor' in col])
     
-    # For test data, we can only use features that are known at prediction time
+    # test data
     test_data = ned_data[-7*24:].copy()
-    test_data_with_features = add_features(test_data)
+    test_data_with_features = add_features(test_data)       
     
-    print("\nTest data features:")
-    print(test_data_with_features.columns.tolist())
-    
-    # Extract known covariates (all features that will be known during prediction)
+    # Extract known covariates, i.e. all features that will be known during prediction/ forecasting 
+    # horizon
     known_features = [
         # Renewable energy volumes
         'volume_sun', 'volume_land-wind', 'volume_sea-wind',
@@ -90,26 +88,24 @@ def load_test_data(use_full_context=False):
         'is_holiday', 'is_holiday_adjacent',
         # Vacation features
         'is_school_vacation', 'is_summer_vacation', 'vacation_type',
-        # Interaction features
-        'sun_hour', 'wind_hour',
-        # Squared features
-        'temperature_squared', 'sun_squared', 'wind_squared',
-        # Percentage features
-        'renewable_percentage'
+        # # Interaction features
+        # 'sun_hour', 'wind_hour',
+        # # Squared features
+        # 'temperature_squared', 'sun_squared', 'wind_squared',
+        # # Percentage features
+        # 'renewable_percentage'
     ]
 
+    
     # Create covariates DataFrame with all known features
     covariates = test_data_with_features[known_features].copy()
     
-    # Safety check for known_covariates (this is what matters)
+    # Safety check for known_covariates
     covariate_cols = covariates.columns
     ef_features = [col for col in covariate_cols if 'emissionfactor' in col]
     if ef_features:
         raise ValueError(f"Found emission factor features in known_covariates: {ef_features}")
-    
-    print("\nKnown covariates for prediction:")
-    print(covariate_cols.tolist())
-    
+       
     print(f"Context period: {context_data.index[0]} to {context_data.index[-1]}")
     print(f"Test period: {test_data.index[0]} to {test_data.index[-1]}")
     print("\nFeature counts in context data:")
@@ -117,6 +113,7 @@ def load_test_data(use_full_context=False):
     print(f"Lag features: {sum('lag' in col for col in context_data.columns)}")
     print(f"Rolling mean features: {sum('rolling_mean' in col for col in context_data.columns)}")
     print(f"Temperature features: {sum(col in ['temperature_celsius', 'temperature_change_1h', 'temperature_change_24h'] for col in context_data.columns)}")
+    
     print(f"Known covariates in test data: {known_features}")
     
     return context_data, test_data, covariates, test_data_with_features

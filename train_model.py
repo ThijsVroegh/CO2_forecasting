@@ -362,9 +362,11 @@ if __name__ == "__main__":
         path=str(MODEL_DIR)
     ).fit(
         gluon_train_data,
-        time_limit=100,
-        presets="best_quality",
-        excluded_model_types=["Chronos", "DeepAR", "TiDE"]
+        #time_limit=300, # 100 seconds
+        presets="best_quality", #best quality model
+        verbosity=4,
+        time_limit=1000,
+        #excluded_model_types=["Chronos", "DeepAR", "TiDE"]
     )
     
     leaderboard = predictor.leaderboard(gluon_train_data, silent=True)
