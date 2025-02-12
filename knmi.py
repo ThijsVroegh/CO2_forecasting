@@ -32,6 +32,22 @@ def process_knmi_data(file_path: str) -> pd.DataFrame:
     # Convert temperature from 0.1°C to °C
     df['T'] = df['T'].astype(float) / 10.0
     
+    # Process additional KNMI features
+    # Q: Global radiation in J/cm2 -> convert to kW/m2 for easier interpretation
+    df['Q'] = df['Q'].astype(float) / 36000  # Convert J/cm2 to kW/m2
+    
+    # FH: Wind speed in 0.1 m/s -> convert to m/s
+    df['FH'] = df['FH'].astype(float) / 10.0
+    
+    # DD: Wind direction in degrees (0-360)
+    df['DD'] = df['DD'].astype(float)
+    
+    # N: Cloud cover in octants (0-9, where 9 is sky not visible)
+    df['N'] = df['N'].astype(float)
+    
+    # U: Relative humidity in percentage
+    df['U'] = df['U'].astype(float)
+    
     # Handle hour 24 by converting it to hour 0 of the next day
     next_day_mask = df['HH'] == 24
     df.loc[next_day_mask, 'HH'] = 0
@@ -45,11 +61,18 @@ def process_knmi_data(file_path: str) -> pd.DataFrame:
     # Create final datetime by combining date and hour
     df['datetime'] = df['date'] + pd.to_timedelta(df['HH'], unit='h')
     
-    # Select only datetime and temperature columns
-    result_df = df[['datetime', 'T']].copy()
+    # Select relevant columns including new features
+    result_df = df[['datetime', 'T', 'Q', 'FH', 'DD', 'N', 'U']].copy()
     
-    # Rename temperature column to be more descriptive
-    result_df = result_df.rename(columns={'T': 'temperature_celsius'})
+    # Rename columns to be more descriptive
+    result_df = result_df.rename(columns={
+        'T': 'temperature',
+        'Q': 'solar_radiation',
+        'FH': 'wind_speed',
+        'DD': 'wind_direction',
+        'N': 'cloud_cover',
+        'U': 'relative_humidity'
+    })
     
     # Sort by datetime
     result_df = result_df.sort_values('datetime')
@@ -70,11 +93,11 @@ def main():
         
         # Display some basic statistics
         print("\nBasic statistics of temperature:")
-        print(df['temperature_celsius'].describe())
+        print(df['temperature'].describe())
         
         # Save the processed data
-        df.to_csv('data/knmi_data/processed_temperatures.csv', index=False)
-        print("\nData saved to 'knmi_data/processed_temperatures.csv'")
+        df.to_csv('data/knmi_data/processed_weather_data.csv', index=False)
+        print("\nData saved to 'knmi_data/processed_weather_data.csv'")
         
     except FileNotFoundError:
         print(f"Error: Could not find the file at {file_path}")

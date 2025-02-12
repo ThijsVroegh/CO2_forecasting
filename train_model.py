@@ -1,8 +1,8 @@
-import os
-from pathlib import Path
+#import os
+#from pathlib import Path
 import matplotlib.pyplot as plt
 import datetime
-import argparse
+#import argparse
 from datetime import date
 from typing import Dict, List
 
@@ -21,18 +21,17 @@ def get_dutch_holidays(year: int) -> Dict[date, str]:
     
     holidays = {
         # Fixed dates
-        date(year, 1, 1): "Nieuwjaarsdag",  # New Year's Day
-        date(year, 4, 27): "Koningsdag",    # King's Day
-        date(year, 5, 5): "Bevrijdingsdag", # Liberation Day
-        date(year, 12, 25): "Eerste Kerstdag",  # Christmas Day
-        date(year, 12, 26): "Tweede Kerstdag",  # Boxing Day
-        
-        # Easter-based holidays
-        easter_date: "Eerste Paasdag",      # Easter Sunday
-        easter_date + pd.Timedelta(days=1): "Tweede Paasdag",  # Easter Monday
-        easter_date + pd.Timedelta(days=39): "Hemelvaartsdag", # Ascension Day
-        easter_date + pd.Timedelta(days=49): "Eerste Pinksterdag",  # Pentecost
-        easter_date + pd.Timedelta(days=50): "Tweede Pinksterdag",  # Whit Monday
+        date(year, 1, 1): "Nieuwjaarsdag",  
+        date(year, 4, 27): "Koningsdag",    
+        date(year, 5, 5): "Bevrijdingsdag", 
+        date(year, 12, 25): "Eerste Kerstdag", 
+        date(year, 12, 26): "Tweede Kerstdag", 
+                
+        easter_date: "Eerste Paasdag",
+        easter_date + pd.Timedelta(days=1): "Tweede Paasdag", 
+        easter_date + pd.Timedelta(days=39): "Hemelvaartsdag", 
+        easter_date + pd.Timedelta(days=49): "Eerste Pinksterdag",
+        easter_date + pd.Timedelta(days=50): "Tweede Pinksterdag",
     }
     return holidays
 
@@ -100,7 +99,31 @@ def get_dutch_school_vacations(year: int) -> Dict[str, List[Dict[str, date]]]:
 
 
 def add_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Add features to the DataFrame."""
+    """   
+    This function adds a variety of features to the DataFrame, including:
+    - Temporal features: hour, day of the week, month, and whether the day is a weekend.
+    - Holiday features: indicators for Dutch national holidays and adjacent days.
+    - Vacation features: indicators for Dutch school vacations, including summer vacations.
+    - Seasonal features: sine and cosine transformations of day of the year, week of the year, 
+      hour of the day, day of the week, month, and quarter.
+    - Emission factor features: differences, lags, and rolling means if the 'emissionfactor' 
+      column is present.
+    - Weather features: temperature, solar radiation, wind speed, wind direction, cloud cover, 
+      and relative humidity, if available from external weather data.
+
+    Parameters:
+    df (pd.DataFrame): The input DataFrame with a DateTime index and optional 'emissionfactor' column.
+
+    Returns:
+    pd.DataFrame: A new DataFrame with the original data and additional features.
+    
+    Notes:
+    - The function assumes the input DataFrame has a DateTime index.
+    - Weather data is expected to be in 'data/knmi_data/processed_weather_data.csv'. This data is from
+    https://www.knmi.nl/nederland-nu/klimatologie/uurgegevens, from de Bilt weather station.    
+    - The function modifies a copy of the input DataFrame to avoid altering the original data.
+    """
+        
     df = df.copy()
     
     # Add temporal features
@@ -208,60 +231,34 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
     
     # Add temperature features if available
     try:
-        temp_df = pd.read_csv('data/knmi_data/processed_temperatures.csv')
-        temp_df['datetime'] = pd.to_datetime(temp_df['datetime'])
-        temp_df = temp_df.set_index('datetime')
+        # Read weather data with all KNMI variables
+        weather_df = pd.read_csv('data/knmi_data/processed_weather_data.csv')
+        weather_df['datetime'] = pd.to_datetime(weather_df['datetime'])
+        weather_df = weather_df.set_index('datetime')
         
-        # Merge temperature data
-        df = df.join(temp_df[['temperature_celsius']], how='left')
+        # Add temperature and its derived features
+        df['temperature'] = weather_df['temperature'].reindex(df.index)
+        df['temperature_change_1h'] = df['temperature'].diff()
+        df['temperature_change_24h'] = df['temperature'].diff(24)
         
-        # Add temperature features
-        df['temperature_change_1h'] = temp_df['temperature_celsius'].diff()
-        df['temperature_change_24h'] = temp_df['temperature_celsius'].diff(24)
-        
-        # Add temperature lag features based on correlation analysis
-        temp_lags = [1, 8, 9, 10, 20, 21, 22, 23, 24]
-        for lag in temp_lags:
-            df[f'temperature_lag_{lag}h'] = temp_df['temperature_celsius'].shift(lag)
+        # Add temperature lag features
+        important_lags = [1, 8, 9, 10, 20, 21, 22, 23, 24]
+        for lag in important_lags:
+            df[f'temperature_lag_{lag}h'] = df['temperature'].shift(lag)
         
         # Add temperature rolling means
-        temp_windows = [24, 168]
-        for window in temp_windows:
-            df[f'temperature_rolling_mean_{window}h'] = (
-                temp_df['temperature_celsius'].rolling(window=window, min_periods=1).mean()
-            )
+        df['temperature_rolling_mean_24h'] = df['temperature'].rolling(window=24, min_periods=1).mean()
+        df['temperature_rolling_mean_168h'] = df['temperature'].rolling(window=168, min_periods=1).mean()
         
-        # Fill any missing values
-        temp_features = (
-            ['temperature_celsius', 'temperature_change_1h', 'temperature_change_24h'] +
-            [f'temperature_lag_{lag}h' for lag in temp_lags] +
-            [f'temperature_rolling_mean_{window}h' for window in temp_windows]
-        )
-        df[temp_features] = df[temp_features].fillna(method='ffill').fillna(method='bfill')
+        # Add other KNMI features
+        df['solar_radiation'] = weather_df['solar_radiation'].reindex(df.index)
+        df['wind_speed'] = weather_df['wind_speed'].reindex(df.index)
+        df['wind_direction'] = weather_df['wind_direction'].reindex(df.index)
+        df['cloud_cover'] = weather_df['cloud_cover'].reindex(df.index)
+        df['relative_humidity'] = weather_df['relative_humidity'].reindex(df.index)
         
-    except Exception as e:
-        print(f"Warning: Could not load temperature data: {str(e)}")
-        # Fill with zeros if temperature data is unavailable
-        temp_features = (
-            ['temperature_celsius', 'temperature_change_1h', 'temperature_change_24h'] +
-            [f'temperature_lag_{lag}h' for lag in [1, 8, 9, 10, 20, 21, 22, 23, 24]] +
-            [f'temperature_rolling_mean_{window}h' for window in [24, 168]]
-        )
-        for col in temp_features:
-            df[col] = 0
-    
-    # Add interaction terms between renewables and time
-    # df['sun_hour'] = df['volume_sun'] * df['hour']
-    # df['wind_hour'] = (df['volume_land-wind'] + df['volume_sea-wind']) * df['hour']
-    
-    # # Add squared terms for important features
-    # df['temperature_squared'] = df['temperature_celsius'] ** 2
-    # df['sun_squared'] = df['volume_sun'] ** 2
-    # df['wind_squared'] = (df['volume_land-wind'] + df['volume_sea-wind']) ** 2
-    
-    # # Add total renewable percentage
-    # total_volume = df['volume_sun'] + df['volume_land-wind'] + df['volume_sea-wind']
-    # df['renewable_percentage'] = total_volume / total_volume.max()
+    except FileNotFoundError:
+        print("Warning: Weather data not found, temperature features will not be added")
     
     return df
 
@@ -343,28 +340,24 @@ if __name__ == "__main__":
             # Cyclical features - Quarter
             "quarter_sin", "quarter_cos",
             # Temperature features
-            "temperature_celsius", "temperature_change_1h", "temperature_change_24h",
+            "temperature", "temperature_change_1h", "temperature_change_24h",
             # Temperature lag features
             'temperature_lag_1h', 'temperature_lag_8h', 'temperature_lag_9h', 'temperature_lag_10h', 'temperature_lag_20h', 'temperature_lag_21h', 'temperature_lag_22h', 'temperature_lag_23h', 'temperature_lag_24h',
             # Temperature rolling means
             'temperature_rolling_mean_24h', 'temperature_rolling_mean_168h',
+            # Weather features
+            "solar_radiation", "wind_speed", "wind_direction", "cloud_cover", "relative_humidity",
             # Holiday features
             "is_holiday", "is_holiday_adjacent",
             # Vacation features
-            "is_school_vacation", "is_summer_vacation", "vacation_type",
-            # # Interaction features
-            # "sun_hour", "wind_hour",
-            # # Squared features
-            # "temperature_squared", "sun_squared", "wind_squared",
-            # # Percentage features
-            # "renewable_percentage"
+            "is_school_vacation", "is_summer_vacation", "vacation_type",                        
         ],
         path=str(MODEL_DIR)
     ).fit(
         train_data=gluon_train_data,        
-        presets="best_quality", #best quality model
+        presets="best_quality",
         verbosity=4,
-        time_limit=1000, # 100 seconds
+        time_limit=1000,
         num_val_windows=3, # Used to select best model during training
         #excluded_model_types=["Chronos", "DeepAR", "TiDE"]
     )

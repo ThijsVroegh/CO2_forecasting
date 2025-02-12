@@ -1,12 +1,23 @@
 import pandas as pd
 import matplotlib.pyplot as plt
-from pathlib import Path
+#from pathlib import Path
 import datetime
 
 from config import FORECAST_DIR
 
 def load_latest_forecasts():
-    """Load the most recent forecast files."""
+    """    
+    This function retrieves the latest renewable energy forecasts and emission factor
+    predictions, which are used for real-time forecasting of co2 emissions in the next 7 days,
+    without having the real values of co2 emissions to compare with like in the test set.
+    It reads the most recent CSV files for forecasts and predictions, synchronizes
+    their indices, and returns them as sorted pandas DataFrames.
+
+    Returns:
+        tuple: A tuple containing two pandas DataFrames:
+            - forecast_df: DataFrame with renewable energy forecasts.
+            - prediction_df: DataFrame with emission factor predictions.
+"""
     # Get most recent files
     
     # contain NED's renewable energy forecasts used as input data for predictions
@@ -40,7 +51,23 @@ def load_latest_forecasts():
     return forecast_df, prediction_df
 
 def plot_forecasts(forecast_df, prediction_df):
-    """Create plots of the forecasts."""
+    """
+    Create and save plots of emission factor and renewable production forecasts.
+
+    This function generates a plot with two subplots: the top subplot displays
+    the emission factor forecast with mean and 10-90% quantile ranges, while
+    the bottom subplot shows the renewable production forecast for sea-wind,
+    land-wind, and solar energy. The plot is saved as a PNG file in the
+    FORECAST_DIR with a timestamp in the filename.
+
+    Parameters:
+        forecast_df (pd.DataFrame): DataFrame containing renewable production
+            forecast data with columns 'volume_sea-wind', 'volume_land-wind',
+            and 'volume_sun'.
+        prediction_df (pd.DataFrame): DataFrame containing emission factor
+            forecast data with columns for mean and quantile values.    
+    """
+    
     # Create figure with two subplots
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), height_ratios=[1, 1])
     

@@ -13,12 +13,12 @@ def predict():
     
     This function uses a two-step approach:
     1. Recent Context: Gets the last 4 weeks of data to understand current trends
-       (While the model is trained on 5 years of data, it only needs recent context
+       (While the model is trained on much more data, it only needs recent context
        for making predictions, similar to how weather forecasts use recent conditions)
     2. Future Information: Gets NED's renewable energy forecasts for the next 7 days
     
     The model combines:
-    - Long-term patterns (learned during training from 5 years of data)
+    - Long-term patterns (learned during training from years of data)
     - Recent trends (from 4 weeks of context)
     - Known future renewable production (from NED forecasts)
     - Lagged features (1h, 2h, 3h, 24h, 48h, 168h)
@@ -34,17 +34,14 @@ def predict():
        NED's renewable energy forecasts used as covariates
     
     Returns:
-        None
-    
-    Raises:
-        FileNotFoundError: If the trained model cannot be found
-        ValueError: If required data columns are missing
+        None       
         
     See Also:
         retrieve_ned.RUNUP_PERIOD: Constant defining how many days of context to use
         retrieve_ned.get_historical_data(): Function used for model training
     """
-    # Get data ----
+    
+    # Get data
     
     # 'runup_data' contains historical data used as context for the last 4 weeks. It 
     # includes renewable energy volumes and emission factors.
@@ -60,7 +57,10 @@ def predict():
     
     # Add all features to both datasets
     runup_data_with_features = add_features(runup_data)
+    print("Runup data features after adding features:", runup_data_with_features.columns.tolist())
+    
     forecast_data_with_features = add_features(forecast_data)
+    print("Forecast data features after adding features:", forecast_data_with_features.columns.tolist())
     
     # Debug: print features in forecast data
     print("\nFeatures in forecast data:")

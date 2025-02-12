@@ -79,21 +79,17 @@ def load_test_data(use_full_context=False):
         # Cyclical features - Quarter
         'quarter_sin', 'quarter_cos',
         # Temperature features
-        'temperature_celsius', 'temperature_change_1h', 'temperature_change_24h',
+        'temperature', 'temperature_change_1h', 'temperature_change_24h',
         # Temperature lag features
         *[f'temperature_lag_{lag}h' for lag in [1, 8, 9, 10, 20, 21, 22, 23, 24]],
         # Temperature rolling means
         *[f'temperature_rolling_mean_{window}h' for window in [24, 168]],
+        # Weather features
+        "solar_radiation", "wind_speed", "wind_direction", "cloud_cover", "relative_humidity",
         # Holiday features
         'is_holiday', 'is_holiday_adjacent',
         # Vacation features
-        'is_school_vacation', 'is_summer_vacation', 'vacation_type',
-        # # Interaction features
-        # 'sun_hour', 'wind_hour',
-        # # Squared features
-        # 'temperature_squared', 'sun_squared', 'wind_squared',
-        # # Percentage features
-        # 'renewable_percentage'
+        'is_school_vacation', 'is_summer_vacation', 'vacation_type',        
     ]
 
     
@@ -112,7 +108,7 @@ def load_test_data(use_full_context=False):
     print(f"Temporal features: {sum(col in ['hour', 'dayofweek', 'month', 'is_weekend'] for col in context_data.columns)}")
     print(f"Lag features: {sum('lag' in col for col in context_data.columns)}")
     print(f"Rolling mean features: {sum('rolling_mean' in col for col in context_data.columns)}")
-    print(f"Temperature features: {sum(col in ['temperature_celsius', 'temperature_change_1h', 'temperature_change_24h'] for col in context_data.columns)}")
+    print(f"Temperature features: {sum(col in ['temperature', 'temperature_change_1h', 'temperature_change_24h'] for col in context_data.columns)}")
     
     print(f"Known covariates in test data: {known_features}")
     
@@ -182,7 +178,7 @@ def evaluate_forecast(use_full_context=False):
         'is_school_vacation': test_data_with_features['is_school_vacation'].values,
         'is_summer_vacation': test_data_with_features['is_summer_vacation'].values,
         # Temperature (if available)
-        'temperature': test_data_with_features.get('temperature_celsius', pd.Series([None] * len(test_data))).values
+        'temperature': test_data_with_features.get('temperature', pd.Series([None] * len(test_data))).values
     }, index=test_data.index)
     
     # Generate timestamp for all saved files
@@ -209,7 +205,7 @@ def evaluate_forecast(use_full_context=False):
     
     # Calculate additional metrics
     mae = mean_absolute_error(test_data['emissionfactor'].values, prediction[mean_col].values)
-    mape = mean_absolute_percentage_error(test_data['emissionfactor'].values, prediction[mean_col].values) * 100  # Convert to percentage
+    mape = mean_absolute_percentage_error(test_data['emissionfactor'].values, prediction[mean_col].values) * 100
     r2 = r2_score(test_data['emissionfactor'].values, prediction[mean_col].values)
     
     ax1.set_title(f'Prediction Analysis (RMSE: {rmse:.4f}, MAE: {mae:.4f}, MAPE: {mape:.1f}%, R²: {r2:.3f}')
