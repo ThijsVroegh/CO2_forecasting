@@ -83,9 +83,7 @@ def load_test_data(use_full_context=False):
         # Temperature lag features
         *[f'temperature_lag_{lag}h' for lag in [1, 8, 9, 10, 20, 21, 22, 23, 24]],
         # Temperature rolling means
-        *[f'temperature_rolling_mean_{window}h' for window in [24, 168]],
-        # Weather features
-        "solar_radiation", "wind_speed", "wind_direction", "cloud_cover", "relative_humidity",
+        *[f'temperature_rolling_mean_{window}h' for window in [24, 168]],        
         # Holiday features
         'is_holiday', 'is_holiday_adjacent',
         # Vacation features

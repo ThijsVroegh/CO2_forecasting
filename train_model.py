@@ -1,11 +1,7 @@
-#import os
-#from pathlib import Path
 import matplotlib.pyplot as plt
 import datetime
-#import argparse
 from datetime import date
 from typing import Dict, List
-
 import pandas as pd
 import numpy as np
 from autogluon.timeseries import TimeSeriesDataFrame, TimeSeriesPredictor
@@ -13,7 +9,6 @@ from dateutil.easter import easter
 
 import read_ned
 from config import MODEL_DIR, HISTORICAL_DIR, TRAINING_DAYS
-
 
 def get_dutch_holidays(year: int) -> Dict[date, str]:
     """Return Dutch national holidays for a given year."""
@@ -108,8 +103,7 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
       hour of the day, day of the week, month, and quarter.
     - Emission factor features: differences, lags, and rolling means if the 'emissionfactor' 
       column is present.
-    - Weather features: temperature, solar radiation, wind speed, wind direction, cloud cover, 
-      and relative humidity, if available from external weather data.
+    - Weather features: temperature
 
     Parameters:
     df (pd.DataFrame): The input DataFrame with a DateTime index and optional 'emissionfactor' column.
@@ -230,38 +224,34 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
             )
     
     # Add temperature features if available
-    try:
-        # Read weather data with all KNMI variables
-        weather_df = pd.read_csv('data/knmi_data/processed_weather_data.csv')
+    try:     
+        weather_df = pd.read_csv('data/knmi_data/processed_temperatures.csv')
         weather_df['datetime'] = pd.to_datetime(weather_df['datetime'])
         weather_df = weather_df.set_index('datetime')
         
-        # Add temperature and its derived features
-        df['temperature'] = weather_df['temperature'].reindex(df.index)
-        df['temperature_change_1h'] = df['temperature'].diff()
-        df['temperature_change_24h'] = df['temperature'].diff(24)
+        # Merge temperature data
+        df = df.join(weather_df[['temperature']], how='left')
         
-        # Add temperature lag features
-        important_lags = [1, 8, 9, 10, 20, 21, 22, 23, 24]
-        for lag in important_lags:
-            df[f'temperature_lag_{lag}h'] = df['temperature'].shift(lag)
-        
+        # Add temperature features
+        df['temperature_change_1h']  = weather_df['temperature'].diff()
+        df['temperature_change_24h'] = weather_df['temperature'].diff(24)
+
+        # Add temperature lag features based on correlation analysis
+        temp_lags = [1, 8, 9, 10, 20, 21, 22, 23, 24]
+        for lag in temp_lags:
+            df[f'temperature_lag_{lag}h'] = weather_df['temperature'].shift(lag)
+
         # Add temperature rolling means
-        df['temperature_rolling_mean_24h'] = df['temperature'].rolling(window=24, min_periods=1).mean()
-        df['temperature_rolling_mean_168h'] = df['temperature'].rolling(window=168, min_periods=1).mean()
-        
-        # Add other KNMI features
-        df['solar_radiation'] = weather_df['solar_radiation'].reindex(df.index)
-        df['wind_speed'] = weather_df['wind_speed'].reindex(df.index)
-        df['wind_direction'] = weather_df['wind_direction'].reindex(df.index)
-        df['cloud_cover'] = weather_df['cloud_cover'].reindex(df.index)
-        df['relative_humidity'] = weather_df['relative_humidity'].reindex(df.index)
-        
+        temp_windows = [24, 168]
+        for window in temp_windows:
+            df[f'temperature_rolling_mean_{window}h'] = (
+                weather_df['temperature'].rolling(window=window, min_periods=1).mean()
+            )       
+            
     except FileNotFoundError:
         print("Warning: Weather data not found, temperature features will not be added")
     
     return df
-
 
 def gluonify(df: pd.DataFrame) -> TimeSeriesDataFrame:
     """Convert pandas DataFrame to AutoGluon TimeSeriesDataFrame format."""
@@ -304,8 +294,8 @@ if __name__ == "__main__":
     ned_data = load_training_data()
 
     # Split into train and test sets
-    train_data = ned_data[:-7*24]  # All data except last week
-    test_data = ned_data[-7*24:]   # Last week for testing
+    train_data = ned_data[:-7*24]  # All data except last week available in the dataset 
+    test_data = ned_data[-7*24:]   # Last week reserved for testing
 
     # Add features - training data gets all features
     train_data_with_features = add_features(train_data)
@@ -344,9 +334,7 @@ if __name__ == "__main__":
             # Temperature lag features
             'temperature_lag_1h', 'temperature_lag_8h', 'temperature_lag_9h', 'temperature_lag_10h', 'temperature_lag_20h', 'temperature_lag_21h', 'temperature_lag_22h', 'temperature_lag_23h', 'temperature_lag_24h',
             # Temperature rolling means
-            'temperature_rolling_mean_24h', 'temperature_rolling_mean_168h',
-            # Weather features
-            "solar_radiation", "wind_speed", "wind_direction", "cloud_cover", "relative_humidity",
+            'temperature_rolling_mean_24h', 'temperature_rolling_mean_168h',            
             # Holiday features
             "is_holiday", "is_holiday_adjacent",
             # Vacation features
@@ -355,10 +343,9 @@ if __name__ == "__main__":
         path=str(MODEL_DIR)
     ).fit(
         train_data=gluon_train_data,        
-        presets="best_quality",
-        verbosity=4,
+        presets="best_quality",        
         time_limit=1000,
-        num_val_windows=3, # Used to select best model during training
+        num_val_windows=3,
         #excluded_model_types=["Chronos", "DeepAR", "TiDE"]
     )
     
@@ -373,6 +360,7 @@ if __name__ == "__main__":
     
     # Calculate and plot feature importance
     compute_importance = False  # Set to True to compute feature importance
+    
     if compute_importance:
         print("\nComputing feature importance (this may take a while)...")
         print("Press Ctrl+C to skip feature importance calculation")
@@ -382,12 +370,17 @@ if __name__ == "__main__":
                 subsample_size=1  # Since we only have one time series
             )
             
+            # Debug: Print feature importance values
+            print("Feature Importance Values:")
+            print(fimportance)
+            
             fimportance = fimportance.sort_values('importance')
 
             plt.figure(figsize=(12,5))
             plt.barh(fimportance.index, fimportance['importance'])
             plt.title('Feature Importance')
             plt.xlabel('Importance Score')
+            plt.show()
             
             # Save feature importance plot
             timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')

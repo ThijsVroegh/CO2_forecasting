@@ -2,6 +2,14 @@
 
 This project forecasts CO2 emission factors for the Dutch electricity grid 7 days ahead. It combines historical data with renewable energy forecasts to predict how "green" the electricity grid will be.
 
+# Model evaluation using testweek (2025-01-31 - 2025-02-06)
+![testset](models/detailed_analysis_4weeks_context_20250214_1512.png)
+
+# Forecast for the co2 emission factor for the next 7 days (upper image) and the renewable energy forecasts (lower image)
+![forecast](forecast_plot_20250214_1646.png)
+
+Note that training took place on the last 180 days of data instead of the entire 5 years (see config.py).
+
 ## Project Overview
 
 The model uses:
@@ -134,3 +142,6 @@ The model uses several types of features:
 - Temperature data: [KNMI](https://www.knmi.nl/) (optional)
 
 More information on the NED API is available [here](https://ned.nl/nl/api).
+
+## TODO
+Connect temperature forecast data to the model.

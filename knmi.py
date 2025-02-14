@@ -95,6 +95,8 @@ def main():
         print("\nBasic statistics of temperature:")
         print(df['temperature'].describe())
         
+        df = df[['datetime', 'temperature']]
+        
         # Save the processed data
         df.to_csv('data/knmi_data/processed_weather_data.csv', index=False)
         print("\nData saved to 'knmi_data/processed_weather_data.csv'")
