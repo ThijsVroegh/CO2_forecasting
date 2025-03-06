@@ -62,34 +62,64 @@ def load_test_data(use_full_context=False):
     # Extract known covariates, i.e. all features that will be known during prediction/ forecasting 
     # horizon
     known_features = [
-        # Renewable energy volumes
-        'volume_sun', 'volume_land-wind', 'volume_sea-wind',
-        # Basic temporal features
-        'hour', 'dayofweek', 'month', 'is_weekend',
-        # Cyclical features - Day of year
-        'day_of_year_sin', 'day_of_year_cos',
-        # Cyclical features - Week of year
-        'week_of_year_sin', 'week_of_year_cos',
-        # Cyclical features - Hour
-        'hour_sin', 'hour_cos',
-        # Cyclical features - Day of week
-        'dayofweek_sin', 'dayofweek_cos',
-        # Cyclical features - Month
-        'month_sin', 'month_cos',
-        # Cyclical features - Quarter
-        'quarter_sin', 'quarter_cos',
-        # Temperature features
-        'temperature', 'temperature_change_1h', 'temperature_change_24h',
-        # Temperature lag features
-        *[f'temperature_lag_{lag}h' for lag in [1, 8, 9, 10, 20, 21, 22, 23, 24]],
-        # Temperature rolling means
-        *[f'temperature_rolling_mean_{window}h' for window in [24, 168]],        
-        # Holiday features
-        'is_holiday', 'is_holiday_adjacent',
-        # Vacation features
-        'is_school_vacation', 'is_summer_vacation', 'vacation_type',        
+            # Renewable energy volumes
+            "volume_sun", "volume_land-wind", "volume_sea-wind",
+            # Basic temporal features
+            "hour", "dayofweek", "month", "is_weekend",
+            # Cyclical features - Day of year
+            "day_of_year_sin", "day_of_year_cos",
+            # Cyclical features - Week of year
+            "week_of_year_sin", "week_of_year_cos",
+            # Cyclical features - Hour
+            "hour_sin", "hour_cos",
+            # Cyclical features - Day of week
+            "dayofweek_sin", "dayofweek_cos",
+            # Cyclical features - Month
+            "month_sin", "month_cos",
+            # Cyclical features - Quarter
+            "quarter_sin", "quarter_cos",
+            # Temperature features
+            "temperature", "temperature_change_1h", "temperature_change_24h",
+            # Temperature lag features
+            'temperature_lag_1h', 'temperature_lag_8h', 'temperature_lag_9h', 'temperature_lag_10h', 'temperature_lag_20h', 'temperature_lag_21h', 'temperature_lag_22h', 'temperature_lag_23h', 'temperature_lag_24h',
+            # Temperature rolling means
+            'temperature_rolling_mean_24h', 'temperature_rolling_mean_168h',            
+            # Holiday features
+            "is_holiday", "is_holiday_adjacent",
+            # Vacation features
+            "is_school_vacation", "is_summer_vacation", "vacation_type",
+            # Wind features
+            "wind_speed", "wind_speed_change_1h",
+            "wind_speed_rolling_mean_24h",  
+            "wind_speed_rolling_mean_168h", 
+            
+            "wind_direction", "wind_direction_change_1h",
+            "wind_direction_rolling_mean_24h",  
+            "wind_direction_rolling_mean_168h",
+                                    
+            # Cloud
+            'cloud_cover', 'cloud_cover_change_1h', 'cloud_cover_change_24h',
+            "cloud_cover_rolling_mean_24h",  
+            "cloud_cover_rolling_mean_168h",
+        
+            # Solar/Radiation features
+            "solar_radiation", 
+            "solar_radiation_rolling_mean_24h",
+            "solar_radiation_rolling_mean_168h",
+            "direct_radiation",
+            "direct_radiation_rolling_mean_24h",
+            "direct_radiation_rolling_mean_168h",
+            
+            # Humidity
+            'humidity', 'humidity_change_1h', 'humidity_change_24h',
+            "humidity_rolling_mean_24h",  
+            "humidity_rolling_mean_168h",
+            
+            # Precipitation
+            'precipitation', 'precipitation_change_1h', 'precipitation_change_24h',
+            "precipitation_rolling_mean_24h",  
+            "precipitation_rolling_mean_168h"
     ]
-
     
     # Create covariates DataFrame with all known features
     covariates = test_data_with_features[known_features].copy()
@@ -102,13 +132,20 @@ def load_test_data(use_full_context=False):
        
     print(f"Context period: {context_data.index[0]} to {context_data.index[-1]}")
     print(f"Test period: {test_data.index[0]} to {test_data.index[-1]}")
-    print("\nFeature counts in context data:")
-    print(f"Temporal features: {sum(col in ['hour', 'dayofweek', 'month', 'is_weekend'] for col in context_data.columns)}")
-    print(f"Lag features: {sum('lag' in col for col in context_data.columns)}")
-    print(f"Rolling mean features: {sum('rolling_mean' in col for col in context_data.columns)}")
-    print(f"Temperature features: {sum(col in ['temperature', 'temperature_change_1h', 'temperature_change_24h'] for col in context_data.columns)}")
     
-    print(f"Known covariates in test data: {known_features}")
+    # Print feature counts by category
+    print("\nFeature counts by category:")
+    print(f"Renewable features: {sum(any(x in col for x in ['volume_sun', 'volume_land-wind', 'volume_sea-wind']) for col in covariates.columns)}")
+    print(f"Temporal features: {sum(any(x in col for x in ['hour', 'dayofweek', 'month', 'weekend', '_sin', '_cos']) for col in covariates.columns)}")
+    print(f"Wind features: {sum('wind' in col for col in covariates.columns)}")
+    print(f"Temperature features: {sum('temperature' in col for col in covariates.columns)}")
+    print(f"Solar/Radiation features: {sum(any(x in col for x in ['solar', 'radiation', 'irradiance']) for col in covariates.columns)}")
+    print(f"Cloud features: {sum('cloud' in col for col in covariates.columns)}")
+    print(f"Humidity features: {sum('humidity' in col for col in covariates.columns)}")
+    print(f"Precipitation features: {sum(any(x in col for x in ['precipitation', 'rain', 'snowfall']) for col in covariates.columns)}")
+    print(f"Pressure features: {sum('pressure' in col for col in covariates.columns)}")
+    print(f"Other weather features: {sum(any(x in col for x in ['dew_point', 'feels_like', 'evapotranspiration', 'uv_index', 'sunshine']) for col in covariates.columns)}")
+    print(f"Holiday/Vacation features: {sum(any(x in col for x in ['holiday', 'vacation']) for col in covariates.columns)}")
     
     return context_data, test_data, covariates, test_data_with_features
 
@@ -156,7 +193,7 @@ def evaluate_forecast(use_full_context=False):
     predicted_values = prediction[mean_col].values
     rmse = root_mean_squared_error(actual_values, predicted_values)
     
-    # Create comprehensive error analysis table
+    # Create comprehensive error analysis table with all weather variables
     error_tbl = pd.DataFrame({
         'actual': actual_values,
         'predicted': predicted_values,
@@ -175,8 +212,30 @@ def evaluate_forecast(use_full_context=False):
         'is_holiday': test_data_with_features['is_holiday'].values,
         'is_school_vacation': test_data_with_features['is_school_vacation'].values,
         'is_summer_vacation': test_data_with_features['is_summer_vacation'].values,
-        # Temperature (if available)
-        'temperature': test_data_with_features.get('temperature', pd.Series([None] * len(test_data))).values
+        # Weather features
+        'temperature': test_data_with_features['temperature'].values,
+        'humidity': test_data_with_features['humidity'].values,
+        'dew_point': test_data_with_features['dew_point'].values,
+        'feels_like': test_data_with_features['feels_like'].values,
+        'precipitation': test_data_with_features['precipitation'].values,
+        'rain': test_data_with_features['rain'].values,
+        'snowfall': test_data_with_features['snowfall'].values,
+        'pressure_msl': test_data_with_features['pressure_msl'].values,
+        'surface_pressure': test_data_with_features['surface_pressure'].values,
+        'wind_speed': test_data_with_features['wind_speed'].values,
+        'wind_direction': test_data_with_features['wind_direction'].values,
+        'cloud_cover': test_data_with_features['cloud_cover'].values,
+        'evapotranspiration': test_data_with_features['evapotranspiration'].values,
+        'uv_index': test_data_with_features['uv_index'].values,
+        'uv_index_clear': test_data_with_features['uv_index_clear'].values,
+        'is_day': test_data_with_features['is_day'].values,
+        'sunshine_duration': test_data_with_features['sunshine_duration'].values,
+        'solar_radiation': test_data_with_features['solar_radiation'].values,
+        'direct_radiation': test_data_with_features['direct_radiation'].values,
+        'diffuse_radiation': test_data_with_features['diffuse_radiation'].values,
+        'direct_normal_irradiance': test_data_with_features['direct_normal_irradiance'].values,
+        'global_irradiance': test_data_with_features['global_irradiance'].values,
+        'terrestrial_radiation': test_data_with_features['terrestrial_radiation'].values
     }, index=test_data.index)
     
     # Generate timestamp for all saved files
@@ -303,6 +362,76 @@ def evaluate_forecast(use_full_context=False):
     print(f"School Vacation MAE: {error_tbl[error_tbl['is_school_vacation']==1]['absolute_error'].abs().mean():.4f}")
     print(f"Non-Vacation MAE: {error_tbl[error_tbl['is_school_vacation']==0]['absolute_error'].abs().mean():.4f}")
     print(f"Summer Vacation MAE: {error_tbl[error_tbl['is_summer_vacation']==1]['absolute_error'].abs().mean():.4f}")
+    
+    # Add comprehensive weather analysis to the summary
+    print("\nWeather Feature Analysis:")
+    weather_features = [
+        'temperature', 'humidity', 'precipitation', 'wind_speed', 'cloud_cover',
+        'solar_radiation', 'direct_radiation', 'diffuse_radiation',
+        'direct_normal_irradiance', 'global_irradiance', 'terrestrial_radiation'
+    ]
+    
+    for feature in weather_features:
+        if feature in error_tbl.columns:
+            print(f"\n{feature.title()} Analysis:")
+            
+            # Check if the feature has enough unique values for quartile binning
+            unique_values = error_tbl[feature].nunique()
+            
+            if unique_values <= 1:
+                print(f"  Warning: {feature} has only {unique_values} unique value(s)")
+                print(f"  Single value: {error_tbl[feature].iloc[0]}")
+                continue
+                
+            try:
+                # Try to create quartile bins, handling duplicates
+                if error_tbl[feature].nunique() < 4:
+                    # Not enough unique values for quartiles, use unique values
+                    bins = pd.cut(error_tbl[feature], 
+                                bins=unique_values,
+                                labels=[f'{feature} - B{i+1}' for i in range(unique_values)])
+                else:
+                    # Use qcut with duplicates='drop' to handle duplicate edges
+                    bins = pd.qcut(error_tbl[feature], 
+                                 q=4, 
+                                 labels=[f'{feature} - Q{i+1}' for i in range(4)],
+                                 duplicates='drop')
+                
+                # Calculate statistics with observed=True
+                bin_stats = error_tbl.groupby(bins, observed=True)['absolute_error'].agg(['mean', 'std', 'count'])
+                
+                # Get actual value ranges for each bin
+                value_ranges = {}
+                for bin_label in bin_stats.index:
+                    mask = bins == bin_label
+                    values = error_tbl[feature][mask]
+                    value_ranges[bin_label] = (values.min(), values.max())
+                
+                # Print statistics with value ranges
+                for idx in bin_stats.index:
+                    value_range = value_ranges[idx]
+                    print(f"  {idx:30} ({value_range[0]:.2f} to {value_range[1]:.2f}): "
+                          f"MAE = {bin_stats.loc[idx, 'mean']:.4f} ± "
+                          f"{bin_stats.loc[idx, 'std']:.4f} "
+                          f"(n={int(bin_stats.loc[idx, 'count'])})")
+                
+                # Add correlation analysis
+                corr = error_tbl[[feature, 'absolute_error']].corr().iloc[0,1]
+                print(f"  Correlation with absolute error: {corr:.3f}")
+                
+                # Add basic statistics
+                print(f"  Feature statistics:")
+                print(f"    Mean: {error_tbl[feature].mean():.2f}")
+                print(f"    Std: {error_tbl[feature].std():.2f}")
+                print(f"    Min: {error_tbl[feature].min():.2f}")
+                print(f"    Max: {error_tbl[feature].max():.2f}")
+                print(f"    Zero values: {(error_tbl[feature] == 0).sum()} ({(error_tbl[feature] == 0).mean()*100:.1f}%)")
+                
+            except Exception as e:
+                print(f"  Warning: Could not analyze {feature}: {str(e)}")
+                print(f"  Feature statistics:")
+                print(f"    Unique values: {unique_values}")
+                print(f"    Value counts:\n{error_tbl[feature].value_counts().head()}")
     
     return test_data, prediction
 

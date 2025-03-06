@@ -1,12 +1,13 @@
-import matplotlib.pyplot as plt
+from typing import Dict, List
 import datetime
 from datetime import date
-from typing import Dict, List
+import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 from autogluon.timeseries import TimeSeriesDataFrame, TimeSeriesPredictor
+from autogluon.common import space
 from dateutil.easter import easter
-
+from meteo_utils import combine_meteo_data
 import read_ned
 from config import MODEL_DIR, HISTORICAL_DIR, TRAINING_DAYS
 
@@ -95,7 +96,7 @@ def get_dutch_school_vacations(year: int) -> Dict[str, List[Dict[str, date]]]:
 
 def add_features(df: pd.DataFrame) -> pd.DataFrame:
     """   
-    This function adds a variety of features to the DataFrame, including:
+    This function adds a variety of features to the dataframe, including:
     - Temporal features: hour, day of the week, month, and whether the day is a weekend.
     - Holiday features: indicators for Dutch national holidays and adjacent days.
     - Vacation features: indicators for Dutch school vacations, including summer vacations.
@@ -103,7 +104,8 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
       hour of the day, day of the week, month, and quarter.
     - Emission factor features: differences, lags, and rolling means if the 'emissionfactor' 
       column is present.
-    - Weather features: temperature
+    - Weather features: comprehensive set of weather variables from Open-Meteo API including
+      temperature, humidity, precipitation, wind, cloud cover, and solar radiation.
 
     Parameters:
     df (pd.DataFrame): The input DataFrame with a DateTime index and optional 'emissionfactor' column.
@@ -113,8 +115,7 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
     
     Notes:
     - The function assumes the input DataFrame has a DateTime index.
-    - Weather data is expected to be in 'data/knmi_data/processed_weather_data.csv'. This data is from
-    https://www.knmi.nl/nederland-nu/klimatologie/uurgegevens, from de Bilt weather station.    
+    - Weather data is expected to be available from Open-Meteo API through meteo_utils.py
     - The function modifies a copy of the input DataFrame to avoid altering the original data.
     """
         
@@ -205,8 +206,8 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
     df['quarter_sin'] = np.sin(2 * np.pi * df['quarter'] / 4)
     df['quarter_cos'] = np.cos(2 * np.pi * df['quarter'] / 4)
     
-    # Add emission factor difference and lags    
-    if 'emissionfactor' in df.columns:  
+    # Add emission factor difference and lags
+    if 'emissionfactor' in df.columns:
         # ensures no emission factor features are added to forecast data,
         # only for historical data
         df['emissionfactor_diff'] = df['emissionfactor'].diff()
@@ -223,56 +224,122 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
                 df['emissionfactor'].rolling(window=window, min_periods=1).mean()
             )
     
-    # Add temperature features if available
-    try:     
-        weather_df = pd.read_csv('data/knmi_data/processed_temperatures.csv')
-        weather_df['datetime'] = pd.to_datetime(weather_df['datetime'])
-        weather_df = weather_df.set_index('datetime')
+    # Add weather features
+    try:        
+        weather_df = combine_meteo_data()
         
-        # Merge temperature data
-        df = df.join(weather_df[['temperature']], how='left')
+        # Verify data coverage
+        print("\nData coverage check:")
+        print(f"ned_data period: {df.index.min()} to {df.index.max()}")
+        print(f"weather_data period: {weather_df.index.min()} to {weather_df.index.max()}")
         
-        # Add temperature features
-        df['temperature_change_1h']  = weather_df['temperature'].diff()
-        df['temperature_change_24h'] = weather_df['temperature'].diff(24)
-
-        # Add temperature lag features based on correlation analysis
+        # Basic temperature features
+        if 'temperature' in weather_df.columns:
+            # Use merge with validate to ensure data quality
+            df = pd.merge(df, weather_df[['temperature']], 
+                         left_index=True, right_index=True, 
+                         how='left',
+                         validate='1:1')  # Ensure one-to-one merge
+            
+            # Check for unexpected NaN values
+            nan_count = df['temperature'].isna().sum()
+            if nan_count > 0:
+                print(f"\nWarning: Found {nan_count} unexpected NaN values in temperature after merge")
+        else:
+            print("Warning: temperature not found in weather data")
+            df['temperature'] = 0
+        
+        # Temperature changes
+        df['temperature_change_1h'] = df['temperature'].diff()
+        df['temperature_change_24h'] = df['temperature'].diff(24)
+        
+        # Temperature lags
         temp_lags = [1, 8, 9, 10, 20, 21, 22, 23, 24]
         for lag in temp_lags:
-            df[f'temperature_lag_{lag}h'] = weather_df['temperature'].shift(lag)
-
-        # Add temperature rolling means
-        temp_windows = [24, 168]
+            df[f'temperature_lag_{lag}h'] = df['temperature'].shift(lag)
+        
+        # Temperature rolling means
+        temp_windows = [24, 168]  # 1 day, 1 week
         for window in temp_windows:
             df[f'temperature_rolling_mean_{window}h'] = (
-                weather_df['temperature'].rolling(window=window, min_periods=1).mean()
-            )       
+                df['temperature'].rolling(window=window, min_periods=1).mean()
+            )
+        
+        # Additional weather features from open-meteo
+        weather_features = {
+            'humidity': 'humidity',
+            'dew_point': 'dew_point',
+            'feels_like': 'feels_like',
+            'precipitation': 'precipitation',
+            'rain': 'rain',
+            'snowfall': 'snowfall',
+            'pressure_msl': 'pressure_msl',
+            'surface_pressure': 'surface_pressure',
+            'cloud_cover': 'cloud_cover',
+            'evapotranspiration': 'evapotranspiration',
+            'wind_speed': 'wind_speed',
+            'wind_direction': 'wind_direction',
+            'uv_index': 'uv_index',
+            'uv_index_clear': 'uv_index_clear',
+            'is_day': 'is_day',
+            'sunshine_duration': 'sunshine_duration',
+            'solar_radiation': 'solar_radiation',
+            'direct_radiation': 'direct_radiation',
+            'diffuse_radiation': 'diffuse_radiation',
+            'direct_normal_irradiance': 'direct_normal_irradiance',
+            'global_irradiance': 'global_irradiance',
+            'terrestrial_radiation': 'terrestrial_radiation'
+        }
+        
+        for source_col, target_col in weather_features.items():
+            if source_col in weather_df.columns:                
+                temp_df = pd.merge(df, weather_df[[source_col]],
+                                 left_index=True, right_index=True,
+                                 how='left',
+                                 validate='1:1')
+                
+                if source_col == 'is_day':
+                    # Boolean feature
+                    df[target_col] = temp_df[source_col]
+                else:
+                    # Numeric features
+                    df[target_col] = temp_df[source_col]
+                    
+                    # Add changes except for boolean features
+                    df[f'{target_col}_change_1h'] = df[target_col].diff()
+                    df[f'{target_col}_change_24h'] = df[target_col].diff(24)
+                    
+                    # Add rolling means
+                    for window in temp_windows:
+                        df[f'{target_col}_rolling_mean_{window}h'] = (
+                            df[target_col].rolling(window=window, min_periods=1).mean()
+                        )
+            else:
+                print(f"Warning: {source_col} not found in weather data")
             
-    except FileNotFoundError:
-        print("Warning: Weather data not found, temperature features will not be added")
-    
+    except Exception as e:
+        print(f"Warning: Could not add weather features: {str(e)}")
+        print("Continuing without weather features...")
+
     return df
 
 def gluonify(df: pd.DataFrame) -> TimeSeriesDataFrame:
     """Convert pandas DataFrame to AutoGluon TimeSeriesDataFrame format."""
-    df = df.copy()
-    
-    # Store the index name before resetting
-    index_name = df.index.name if df.index.name is not None else 'index'
-    
-    # Reset index and ensure it becomes a column with the original name
-    df = df.reset_index(level=0)
-    df["item_id"] = 0
-    
-    # Debug: Print columns before renaming
-    print("Columns before renaming:", df.columns.tolist())
-    print("Index name was:", index_name)
-    
+    df = df.copy()  
+
+    # Reset index and ensure it becomes a column named 'timestamp'
+    df = df.reset_index()       
+    df["item_id"] = 0   
+   
     # Ensure the timestamp column is named 'timestamp'
-    if index_name == 'time':
-        df = df.rename(columns={'time': 'timestamp'})
-    elif 'validfrom (UTC)' in df.columns:
+    if 'validfrom (UTC)' in df.columns:
         df = df.rename(columns={'validfrom (UTC)': 'timestamp'})
+    elif 'time' in df.columns:
+        df = df.rename(columns={'time': 'timestamp'})
+    elif 'date' in df.columns:
+        df = df.rename(columns={'date': 'timestamp'})
+    elif 'index' in df.columns:
+        df = df.rename(columns={'index': 'timestamp'})
     
     # If still no timestamp column, check if the index was reset properly
     if 'timestamp' not in df.columns:
@@ -283,20 +350,7 @@ def gluonify(df: pd.DataFrame) -> TimeSeriesDataFrame:
             print(f"Found datetime column: {datetime_cols[0]}")
             df = df.rename(columns={datetime_cols[0]: 'timestamp'})
         else:
-            # If no datetime column found, check the first column
-            first_col = df.columns[0]
-            if isinstance(df[first_col].iloc[0], (pd.Timestamp, datetime.datetime)):
-                print(f"Using first column as timestamp: {first_col}")
-                df = df.rename(columns={first_col: 'timestamp'})
-            else:
-                raise ValueError(f"No suitable timestamp column found. Available columns: {df.columns.tolist()}")
-    
-    # Debug: Print columns after renaming
-    print("Columns after renaming:", df.columns.tolist())
-    print("Timestamp column dtype:", df['timestamp'].dtype)
-    
-    # Ensure timestamp is datetime type
-    df['timestamp'] = pd.to_datetime(df['timestamp'])
+            raise ValueError("No suitable timestamp column found in the DataFrame")
     
     return TimeSeriesDataFrame.from_data_frame(
         df=df,
@@ -342,12 +396,13 @@ if __name__ == "__main__":
     # Convert to AutoGluon format
     gluon_train_data = gluonify(train_data_with_features)
     gluon_test_data = gluonify(test_data_with_features)
-
+    
     # known_covariates are vars that will be "known" in the forecasting horizon
     predictor = TimeSeriesPredictor(
         prediction_length=7*24,
         freq="1h",
         target="emissionfactor",
+        path=str(MODEL_DIR),
         known_covariates_names=[
             # Renewable energy volumes
             "volume_sun", "volume_land-wind", "volume_sea-wind",
@@ -374,17 +429,40 @@ if __name__ == "__main__":
             # Holiday features
             "is_holiday", "is_holiday_adjacent",
             # Vacation features
-            "is_school_vacation", "is_summer_vacation", "vacation_type",                        
-        ],
-        path=str(MODEL_DIR)
+            "is_school_vacation", "is_summer_vacation", "vacation_type",
+            # Wind features
+            "wind_speed", "wind_speed_change_1h",
+            "wind_speed_rolling_mean_24h",  
+            "wind_speed_rolling_mean_168h",            
+            "wind_direction", "wind_direction_change_1h",
+            "wind_direction_rolling_mean_24h",  
+            "wind_direction_rolling_mean_168h",                                    
+            # Cloud
+            'cloud_cover', 'cloud_cover_change_1h', 'cloud_cover_change_24h',
+            "cloud_cover_rolling_mean_24h",  
+            "cloud_cover_rolling_mean_168h",        
+            # Solar/Radiation features
+            "solar_radiation", 
+            "solar_radiation_rolling_mean_24h",
+            "solar_radiation_rolling_mean_168h",
+            "direct_radiation",
+            "direct_radiation_rolling_mean_24h",
+            "direct_radiation_rolling_mean_168h",            
+            # Humidity
+            'humidity', 'humidity_change_1h', 'humidity_change_24h',
+            "humidity_rolling_mean_24h",  
+            "humidity_rolling_mean_168h",            
+            # Precipitation
+            'precipitation', 'precipitation_change_1h', 'precipitation_change_24h',
+            "precipitation_rolling_mean_24h",  
+            "precipitation_rolling_mean_168h", 
+            ]
     ).fit(
         train_data=gluon_train_data,        
-        presets="best_quality",        
+        presets="best_quality",
         time_limit=1000,
-        num_val_windows=3,
-        #excluded_model_types=["Chronos", "DeepAR", "TiDE"]
-    )
-    
+        num_val_windows=3,  # This will reduce the likelihood of overfitting
+    )    
 
     leaderboard = predictor.leaderboard(gluon_train_data, silent=True)
     print("\nModel Leaderboard:")
@@ -412,16 +490,19 @@ if __name__ == "__main__":
             
             fimportance = fimportance.sort_values('importance')
 
-            plt.figure(figsize=(12,5))
+            plt.figure(figsize=(12,15))
             plt.barh(fimportance.index, fimportance['importance'])
             plt.title('Feature Importance')
             plt.xlabel('Importance Score')
-            plt.show()
-            
+                        
             # Save feature importance plot
             timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
             plt.savefig(MODEL_DIR / f'feature_importance_{timestamp}.png', 
-                       dpi=300, bbox_inches='tight')
+                       dpi=600, bbox_inches='tight')
+            
+            # Show plot only after saving
+            plt.show() 
+            
             plt.close()
             
             # Save feature importance data
