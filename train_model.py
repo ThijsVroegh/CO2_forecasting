@@ -256,15 +256,48 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
 def gluonify(df: pd.DataFrame) -> TimeSeriesDataFrame:
     """Convert pandas DataFrame to AutoGluon TimeSeriesDataFrame format."""
     df = df.copy()
-    df = df.reset_index()
+    
+    # Store the index name before resetting
+    index_name = df.index.name if df.index.name is not None else 'index'
+    
+    # Reset index and ensure it becomes a column with the original name
+    df = df.reset_index(level=0)
     df["item_id"] = 0
     
+    # Debug: Print columns before renaming
+    print("Columns before renaming:", df.columns.tolist())
+    print("Index name was:", index_name)
+    
     # Ensure the timestamp column is named 'timestamp'
-    if 'validfrom (UTC)' in df.columns:
-        df = df.rename(columns={'validfrom (UTC)': 'timestamp'})
-    elif 'time' in df.columns:
+    if index_name == 'time':
         df = df.rename(columns={'time': 'timestamp'})
-        
+    elif 'validfrom (UTC)' in df.columns:
+        df = df.rename(columns={'validfrom (UTC)': 'timestamp'})
+    
+    # If still no timestamp column, check if the index was reset properly
+    if 'timestamp' not in df.columns:
+        print("Warning: No timestamp column found. Current columns:", df.columns.tolist())
+        # Try to identify the datetime column
+        datetime_cols = df.select_dtypes(include=['datetime64']).columns
+        if len(datetime_cols) > 0:
+            print(f"Found datetime column: {datetime_cols[0]}")
+            df = df.rename(columns={datetime_cols[0]: 'timestamp'})
+        else:
+            # If no datetime column found, check the first column
+            first_col = df.columns[0]
+            if isinstance(df[first_col].iloc[0], (pd.Timestamp, datetime.datetime)):
+                print(f"Using first column as timestamp: {first_col}")
+                df = df.rename(columns={first_col: 'timestamp'})
+            else:
+                raise ValueError(f"No suitable timestamp column found. Available columns: {df.columns.tolist()}")
+    
+    # Debug: Print columns after renaming
+    print("Columns after renaming:", df.columns.tolist())
+    print("Timestamp column dtype:", df['timestamp'].dtype)
+    
+    # Ensure timestamp is datetime type
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    
     return TimeSeriesDataFrame.from_data_frame(
         df=df,
         timestamp_column="timestamp",
@@ -292,6 +325,11 @@ def load_training_data() -> pd.DataFrame:
 if __name__ == "__main__":
     # Load data with configured training period
     ned_data = load_training_data()
+    
+    print("Columns ned_data:", ned_data.columns.tolist())
+    
+    print("Index name:", ned_data.index.name)
+    print("Index type:", type(ned_data.index))
 
     # Split into train and test sets
     train_data = ned_data[:-7*24]  # All data except last week available in the dataset 
@@ -344,7 +382,7 @@ if __name__ == "__main__":
     ).fit(
         train_data=gluon_train_data,        
         presets="best_quality",        
-        time_limit=1000,
+        time_limit=100,
         num_val_windows=3,
         #excluded_model_types=["Chronos", "DeepAR", "TiDE"]
     )
