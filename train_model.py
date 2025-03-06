@@ -324,19 +324,17 @@ def load_training_data() -> pd.DataFrame:
 
 if __name__ == "__main__":
     # Load data with configured training period
-    ned_data = load_training_data()
-    
+    ned_data = load_training_data()   
     print("Columns ned_data:", ned_data.columns.tolist())
     
-    print("Index name:", ned_data.index.name)
-    print("Index type:", type(ned_data.index))
-
     # Split into train and test sets
     train_data = ned_data[:-7*24]  # All data except last week available in the dataset 
     test_data = ned_data[-7*24:]   # Last week reserved for testing
 
     # Add features - training data gets all features
-    train_data_with_features = add_features(train_data)
+    train_data_with_features = add_features(train_data)    
+    train_data_with_features.head()
+    print("Columns train_data_with_features:", train_data_with_features.columns.tolist())
     
     # Test data only gets features available in forecast horizon
     test_data_with_features = add_features(test_data)
@@ -382,7 +380,7 @@ if __name__ == "__main__":
     ).fit(
         train_data=gluon_train_data,        
         presets="best_quality",        
-        time_limit=100,
+        time_limit=1000,
         num_val_windows=3,
         #excluded_model_types=["Chronos", "DeepAR", "TiDE"]
     )
