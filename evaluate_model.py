@@ -62,35 +62,63 @@ def load_test_data(use_full_context=False):
     # Extract known covariates, i.e. all features that will be known during prediction/ forecasting 
     # horizon
     known_features = [
-        # High importance features (based on plot)
-        "volume_land-wind", "volume_sea-wind", "volume_sun",
+            # Renewable energy volumes
+            "volume_sun", "volume_land-wind", "volume_sea-wind",
+            # Basic temporal features
+            "hour", "dayofweek", "month", "is_weekend",
+            # Cyclical features - Day of year
+            "day_of_year_sin", "day_of_year_cos",
+            # Cyclical features - Week of year
+            "week_of_year_sin", "week_of_year_cos",
+            # Cyclical features - Hour
+            "hour_sin", "hour_cos",
+            # Cyclical features - Day of week
+            "dayofweek_sin", "dayofweek_cos",
+            # Cyclical features - Month
+            "month_sin", "month_cos",
+            # Cyclical features - Quarter
+            "quarter_sin", "quarter_cos",
+            # Temperature features
+            "temperature", "temperature_change_1h", "temperature_change_24h",
+            # Temperature lag features
+            'temperature_lag_1h', 'temperature_lag_8h', 'temperature_lag_9h', 'temperature_lag_10h', 'temperature_lag_20h', 'temperature_lag_21h', 'temperature_lag_22h', 'temperature_lag_23h', 'temperature_lag_24h',
+            # Temperature rolling means
+            'temperature_rolling_mean_24h', 'temperature_rolling_mean_168h',            
+            # Holiday features
+            "is_holiday", "is_holiday_adjacent",
+            # Vacation features
+            "is_school_vacation", "is_summer_vacation", "vacation_type",
+            # Wind features
+            "wind_speed", "wind_speed_change_1h",
+            "wind_speed_rolling_mean_24h",  
+            "wind_speed_rolling_mean_168h", 
+            
+            "wind_direction", "wind_direction_change_1h",
+            "wind_direction_rolling_mean_24h",  
+            "wind_direction_rolling_mean_168h",
+                                    
+            # Cloud
+            'cloud_cover', 'cloud_cover_change_1h', 'cloud_cover_change_24h',
+            "cloud_cover_rolling_mean_24h",  
+            "cloud_cover_rolling_mean_168h",
         
-        # Important temporal features
-        "dayofweek", "is_weekend",
-        "hour_sin", "hour_cos",  # Cyclical encoding of hour
-        "dayofweek_sin", "dayofweek_cos",  # Cyclical encoding of day
-        
-        # Important weather features with their derived features
-        # Wind features
-        "wind_speed", "wind_speed_change_1h",
-        "wind_speed_rolling_mean_24h",  # Explicitly include 24h
-        "wind_speed_rolling_mean_168h", # Explicitly include 168h (1 week)
-        
-        # Temperature features (moderate importance)
-        "temperature", "temperature_change_1h",
-        "temperature_rolling_mean_24h",
-        "temperature_rolling_mean_168h",
-        
-        # Solar/Radiation features (moderate importance)
-        "solar_radiation", 
-        "solar_radiation_rolling_mean_24h",
-        "solar_radiation_rolling_mean_168h",
-        "direct_radiation",
-        "direct_radiation_rolling_mean_24h",
-        "direct_radiation_rolling_mean_168h",
-        
-        # Keep some calendar features for special events
-        "is_holiday", "is_summer_vacation"
+            # Solar/Radiation features
+            "solar_radiation", 
+            "solar_radiation_rolling_mean_24h",
+            "solar_radiation_rolling_mean_168h",
+            "direct_radiation",
+            "direct_radiation_rolling_mean_24h",
+            "direct_radiation_rolling_mean_168h",
+            
+            # Humidity
+            'humidity', 'humidity_change_1h', 'humidity_change_24h',
+            "humidity_rolling_mean_24h",  
+            "humidity_rolling_mean_168h",
+            
+            # Precipitation
+            'precipitation', 'precipitation_change_1h', 'precipitation_change_24h',
+            "precipitation_rolling_mean_24h",  
+            "precipitation_rolling_mean_168h"
     ]
     
     # Create covariates DataFrame with all known features
@@ -108,10 +136,15 @@ def load_test_data(use_full_context=False):
     # Print feature counts by category
     print("\nFeature counts by category:")
     print(f"Renewable features: {sum(any(x in col for x in ['volume_sun', 'volume_land-wind', 'volume_sea-wind']) for col in covariates.columns)}")
-    print(f"Temporal features: {sum(any(x in col for x in ['hour', 'dayofweek', 'weekend']) for col in covariates.columns)}")
+    print(f"Temporal features: {sum(any(x in col for x in ['hour', 'dayofweek', 'month', 'weekend', '_sin', '_cos']) for col in covariates.columns)}")
     print(f"Wind features: {sum('wind' in col for col in covariates.columns)}")
     print(f"Temperature features: {sum('temperature' in col for col in covariates.columns)}")
-    print(f"Solar/Radiation features: {sum(any(x in col for x in ['solar', 'radiation']) for col in covariates.columns)}")
+    print(f"Solar/Radiation features: {sum(any(x in col for x in ['solar', 'radiation', 'irradiance']) for col in covariates.columns)}")
+    print(f"Cloud features: {sum('cloud' in col for col in covariates.columns)}")
+    print(f"Humidity features: {sum('humidity' in col for col in covariates.columns)}")
+    print(f"Precipitation features: {sum(any(x in col for x in ['precipitation', 'rain', 'snowfall']) for col in covariates.columns)}")
+    print(f"Pressure features: {sum('pressure' in col for col in covariates.columns)}")
+    print(f"Other weather features: {sum(any(x in col for x in ['dew_point', 'feels_like', 'evapotranspiration', 'uv_index', 'sunshine']) for col in covariates.columns)}")
     print(f"Holiday/Vacation features: {sum(any(x in col for x in ['holiday', 'vacation']) for col in covariates.columns)}")
     
     return context_data, test_data, covariates, test_data_with_features
@@ -182,10 +215,21 @@ def evaluate_forecast(use_full_context=False):
         # Weather features
         'temperature': test_data_with_features['temperature'].values,
         'humidity': test_data_with_features['humidity'].values,
+        'dew_point': test_data_with_features['dew_point'].values,
+        'feels_like': test_data_with_features['feels_like'].values,
         'precipitation': test_data_with_features['precipitation'].values,
+        'rain': test_data_with_features['rain'].values,
+        'snowfall': test_data_with_features['snowfall'].values,
+        'pressure_msl': test_data_with_features['pressure_msl'].values,
+        'surface_pressure': test_data_with_features['surface_pressure'].values,
         'wind_speed': test_data_with_features['wind_speed'].values,
         'wind_direction': test_data_with_features['wind_direction'].values,
         'cloud_cover': test_data_with_features['cloud_cover'].values,
+        'evapotranspiration': test_data_with_features['evapotranspiration'].values,
+        'uv_index': test_data_with_features['uv_index'].values,
+        'uv_index_clear': test_data_with_features['uv_index_clear'].values,
+        'is_day': test_data_with_features['is_day'].values,
+        'sunshine_duration': test_data_with_features['sunshine_duration'].values,
         'solar_radiation': test_data_with_features['solar_radiation'].values,
         'direct_radiation': test_data_with_features['direct_radiation'].values,
         'diffuse_radiation': test_data_with_features['diffuse_radiation'].values,
