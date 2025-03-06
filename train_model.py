@@ -325,12 +325,12 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
 
 def gluonify(df: pd.DataFrame) -> TimeSeriesDataFrame:
     """Convert pandas DataFrame to AutoGluon TimeSeriesDataFrame format."""
-    df = df.copy()
-    
+    df = df.copy()  
+
     # Reset index and ensure it becomes a column named 'timestamp'
-    df = df.reset_index()
-    df["item_id"] = 0
-    
+    df = df.reset_index()       
+    df["item_id"] = 0   
+   
     # Ensure the timestamp column is named 'timestamp'
     if 'validfrom (UTC)' in df.columns:
         df = df.rename(columns={'validfrom (UTC)': 'timestamp'})
@@ -378,14 +378,17 @@ def load_training_data() -> pd.DataFrame:
 
 if __name__ == "__main__":
     # Load data with configured training period
-    ned_data = load_training_data()
-
+    ned_data = load_training_data()   
+    print("Columns ned_data:", ned_data.columns.tolist())
+    
     # Split into train and test sets
     train_data = ned_data[:-7*24]  # All data except last week available in the dataset 
     test_data = ned_data[-7*24:]   # Last week reserved for testing
 
     # Add features - training data gets all features
-    train_data_with_features = add_features(train_data)
+    train_data_with_features = add_features(train_data)    
+    train_data_with_features.head()
+    print("Columns train_data_with_features:", train_data_with_features.columns.tolist())
     
     # Test data only gets features available in forecast horizon
     test_data_with_features = add_features(test_data)
