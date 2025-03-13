@@ -7,28 +7,47 @@ from typing import Optional, Dict
 import datetime
 import pytz
 
+# def convert_to_nl_time(df: pd.DataFrame) -> pd.DataFrame:
+#     """Convert DataFrame index to Dutch local time format matching ned.nl data.
+    
+#     Args:
+#         df: DataFrame with timezone-aware UTC index
+    
+#     Returns:
+#         DataFrame with timezone-naive index in Dutch local time
+#     """
+#     # First make sure we're working with timezone-aware UTC
+#     if df.index.tz is None:
+#         df.index = df.index.tz_localize('UTC')
+#     elif df.index.tz != pytz.UTC:
+#         df.index = df.index.tz_convert('UTC')
+    
+#     # Convert to Amsterdam time
+#     df.index = df.index.tz_convert('Europe/Amsterdam')
+    
+#     # Remove timezone info to match ned.nl format
+#     df.index = df.index.tz_localize(None)
+    
+#     return df
+
 def convert_to_nl_time(df: pd.DataFrame) -> pd.DataFrame:
-    """Convert DataFrame index to Dutch local time format matching ned.nl data.
+    """Ensure DataFrame index is timezone-naive Dutch local time."""
     
-    Args:
-        df: DataFrame with timezone-aware UTC index
-    
-    Returns:
-        DataFrame with timezone-naive index in Dutch local time
-    """
-    # First make sure we're working with timezone-aware UTC
+    # If the index is naive, assume it is already in Dutch time and return as is
     if df.index.tz is None:
-        df.index = df.index.tz_localize('UTC')
-    elif df.index.tz != pytz.UTC:
-        df.index = df.index.tz_convert('UTC')
+        return df  # No conversion needed
     
-    # Convert to Amsterdam time
+    # If the index is already in Europe/Amsterdam, just remove timezone info
+    if str(df.index.tz) == "Europe/Amsterdam":
+        df.index = df.index.tz_localize(None)
+        return df
+    
+    # Otherwise, assume UTC and convert to Dutch time
     df.index = df.index.tz_convert('Europe/Amsterdam')
-    
-    # Remove timezone info to match ned.nl format
     df.index = df.index.tz_localize(None)
     
     return df
+
 
 def fetch_historical_weather() -> pd.DataFrame:
     """Fetch historical weather data from Open-Meteo API.
