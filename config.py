@@ -13,4 +13,5 @@ for directory in [DATA_DIR, MODEL_DIR, FORECAST_DIR, HISTORICAL_DIR, DOWNLOADED_
     directory.mkdir(exist_ok=True, parents=True)
 
 # Training configuration
-TRAINING_DAYS = 180  # Set to number of days (e.g., 180) or None for all data 
+#TRAINING_DAYS = 180  # Set to number of days (e.g., 180) or None for all data 
+TRAINING_DAYS = None

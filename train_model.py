@@ -10,6 +10,7 @@ from dateutil.easter import easter
 from meteo_utils import combine_meteo_data
 import read_ned
 from config import MODEL_DIR, HISTORICAL_DIR, TRAINING_DAYS
+import price_analysis
 
 def get_dutch_holidays(year: int) -> Dict[date, str]:
     """Return Dutch national holidays for a given year."""
@@ -97,26 +98,28 @@ def get_dutch_school_vacations(year: int) -> Dict[str, List[Dict[str, date]]]:
 def add_features(df: pd.DataFrame) -> pd.DataFrame:
     """   
     This function adds a variety of features to the dataframe, including:
-    - Temporal features: hour, day of the week, month, and whether the day is a weekend.
-    - Holiday features: indicators for Dutch national holidays and adjacent days.
-    - Vacation features: indicators for Dutch school vacations, including summer vacations.
-    - Seasonal features: sine and cosine transformations of day of the year, week of the year, 
-      hour of the day, day of the week, month, and quarter.
-    - Emission factor features: differences, lags, and rolling means if the 'emissionfactor' 
-      column is present.
-    - Weather features: comprehensive set of weather variables from Open-Meteo API including
-      temperature, humidity, precipitation, wind, cloud cover, and solar radiation.
+        - Temporal features: hour, day of the week, month, and whether the day is a weekend.
+        - Holiday features: indicators for Dutch national holidays and adjacent days.
+        - Vacation features: indicators for Dutch school vacations, including summer vacations.
+        - Seasonal features: sine and cosine transformations of day of the year, week of the year, 
+        hour of the day, day of the week, month, and quarter.
+        - Emission factor features: differences, lags, and rolling means if the 'emissionfactor' 
+        column is present.
+        - Weather features: comprehensive set of weather variables from Open-Meteo API including
+        temperature, humidity, precipitation, wind, cloud cover, and solar radiation.
+        - Price features: electricity and gas price data with energy crisis indicators.
 
     Parameters:
-    df (pd.DataFrame): The input DataFrame with a DateTime index and optional 'emissionfactor' column.
+        df (pd.DataFrame): The input DataFrame with a DateTime index and optional 'emissionfactor' column.
 
     Returns:
-    pd.DataFrame: A new DataFrame with the original data and additional features.
+        pd.DataFrame: A new DataFrame with the original data and additional features.
     
     Notes:
-    - The function assumes the input DataFrame has a DateTime index.
-    - Weather data is expected to be available from Open-Meteo API through meteo_utils.py
-    - The function modifies a copy of the input DataFrame to avoid altering the original data.
+        - The function assumes the input DataFrame has a DateTime index.
+        - Weather data is expected to be available from Open-Meteo API through meteo_utils.py
+        - Price data is loaded from the price_analysis module
+        - The function modifies a copy of the input DataFrame to avoid altering the original data.
     """
         
     df = df.copy()
@@ -224,6 +227,50 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
                 df['emissionfactor'].rolling(window=window, min_periods=1).mean()
             )
     
+    # Add price and energy crisis features
+    try:
+        # Load price features
+        script_dir = MODEL_DIR.parent
+        price_features_file = script_dir / "data" / "price_features.csv"
+        
+        if price_features_file.exists():
+            print(f"Loading price features from {price_features_file}")
+            price_df = pd.read_csv(price_features_file, index_col=0, parse_dates=True)
+            
+            # Verify data coverage
+            print("\nPrice data coverage check:")
+            print(f"Input data period: {df.index.min()} to {df.index.max()}")
+            print(f"Price data period: {price_df.index.min()} to {price_df.index.max()}")
+            
+            # Merge price features with data
+            # Only include base features that would be known for future forecast periods
+            price_features_to_include = [
+                'elec_price', 'gas_price', 'gas_to_elec_ratio',
+                #'elec_price_diff_1d','elec_price_diff_1w',
+                'energy_crisis','phase_pre_crisis', 'phase_early_crisis','phase_acute_crisis', 
+                'phase_peak_crisis', 'phase_stabilization'
+            ]
+            
+            if set(price_features_to_include).issubset(price_df.columns):                
+                df = pd.merge(df, price_df[price_features_to_include], 
+                             left_index=True, right_index=True, 
+                             how='left', 
+                             validate='1:1')  # Ensure one-to-one merge
+                
+                # Check for NaN values from merge
+                nan_count = df['elec_price'].isna().sum()
+                if nan_count > 0:
+                    print(f"\nWarning: Found {nan_count} NaN values in electricity price after merge")
+                    # Fill NaN values with forward fill then backward fill
+                    df[price_features_to_include] = df[price_features_to_include].ffill().bfill()
+            else:
+                missing_cols = set(price_features_to_include) - set(price_df.columns)
+                print(f"Warning: Missing required price features: {missing_cols}")                
+        
+    except Exception as e:
+        print(f"Warning: Could not add price features: {str(e)}")
+        print("Continuing without price features...")
+    
     # Add weather features
     try:        
         weather_df = combine_meteo_data()
@@ -328,8 +375,8 @@ def gluonify(df: pd.DataFrame) -> TimeSeriesDataFrame:
     df = df.copy()  
 
     # Reset index and ensure it becomes a column named 'timestamp'
-    df = df.reset_index()       
-    df["item_id"] = 0   
+    df = df.reset_index()
+    df["item_id"] = 0
    
     # Ensure the timestamp column is named 'timestamp'
     if 'validfrom (UTC)' in df.columns:
@@ -361,6 +408,7 @@ def gluonify(df: pd.DataFrame) -> TimeSeriesDataFrame:
 
 def load_training_data() -> pd.DataFrame:
     """Load and optionally filter historical data for training."""
+    
     ned_data = read_ned.read_all(HISTORICAL_DIR)
     ned_data.index = pd.to_datetime(ned_data.index)
     
@@ -386,7 +434,7 @@ if __name__ == "__main__":
     test_data = ned_data[-7*24:]   # Last week reserved for testing
 
     # Add features - training data gets all features
-    train_data_with_features = add_features(train_data)    
+    train_data_with_features = add_features(train_data)
     train_data_with_features.head()
     print("Columns train_data_with_features:", train_data_with_features.columns.tolist())
     
@@ -456,12 +504,18 @@ if __name__ == "__main__":
             'precipitation', 'precipitation_change_1h', 'precipitation_change_24h',
             "precipitation_rolling_mean_24h",  
             "precipitation_rolling_mean_168h", 
+            # Price features
+            #"elec_price", "gas_price", "gas_to_elec_ratio", 'elec_price_diff_1d','elec_price_diff_1w',
+            # Energy crisis indicators
+            "energy_crisis",
+            "phase_pre_crisis", "phase_early_crisis", 
+            "phase_acute_crisis", "phase_peak_crisis", "phase_stabilization",
             ]
     ).fit(
-        train_data=gluon_train_data,        
-        presets="best_quality",
-        time_limit=1000,
-        num_val_windows=3,  # This will reduce the likelihood of overfitting
+        train_data      = gluon_train_data,
+        presets         = "best_quality",
+        time_limit      = 1000,
+        num_val_windows = 3,  # This will reduce the likelihood of overfitting
     )    
 
     leaderboard = predictor.leaderboard(gluon_train_data, silent=True)
@@ -472,7 +526,7 @@ if __name__ == "__main__":
     print("\nFeatures used in training:")
     print(gluon_train_data.columns.tolist())
     
-    # Calculate and plot feature importance
+    # Calculate and plot feature importance ----
     compute_importance = False  # Set to True to compute feature importance
     
     if compute_importance:
