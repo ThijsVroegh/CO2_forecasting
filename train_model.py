@@ -6,10 +6,12 @@ import pandas as pd
 import numpy as np
 from autogluon.timeseries import TimeSeriesDataFrame, TimeSeriesPredictor
 from autogluon.common import space
+from autogluon.timeseries.splitter import ExpandingWindowSplitter
 from dateutil.easter import easter
 from meteo_utils import combine_meteo_data
 import read_ned
 from config import MODEL_DIR, HISTORICAL_DIR, TRAINING_DAYS
+
 
 def get_dutch_holidays(year: int) -> Dict[date, str]:
     """Return Dutch national holidays for a given year."""
@@ -513,3 +515,48 @@ if __name__ == "__main__":
             print("\nFeature importance calculation skipped by user")
         except Exception as e:
             print(f"Warning: Could not compute feature importance: {str(e)}")
+        
+    # Backtesting using multiple windows ----
+    prediction_length = 7*24
+    data = ned_data
+    data["item_id"] = 0
+
+    # Add features to data
+    data_with_features = add_features(data)
+
+    gluon_data = gluonify(data_with_features)
+    train_data_back, test_data_back = gluon_data.train_test_split(prediction_length)
+    
+    # test_data now contains exactly the same data as the original data: it 
+    # contains both historic data and the forecast horizon. This is different from 
+    # how we defined the testdata above, where it was only the last week!    
+    # Inspect dimensions of our new test_data df
+    num_rows, num_columns = test_data_back.shape
+    print(f"Rows: {num_rows}, Columns: {num_columns}")   
+    
+    # plot the train and test data   
+    item_id = 0
+    
+    fig, (ax1, ax2) = plt.subplots(nrows=2, figsize=[10, 4], sharex=True)
+    train_ts = train_data_back.loc[item_id]    
+    test_ts = test_data_back.loc[item_id]
+        
+    # Plot only the 'emissionfactor' column
+    ax1.set_title("Train data (past time series values)")
+    ax1.plot(train_ts['emissionfactor'], label='Emission Factor')
+    ax2.set_title("Test data (past + future time series values)")
+    ax2.plot(test_ts['emissionfactor'], label='Emission Factor')
+
+    for ax in (ax1, ax2):
+        ax.fill_between(np.array([train_ts.index[-1], test_ts.index[-1]]), test_ts['emissionfactor'].min(), test_ts['emissionfactor'].max(), color="C1", alpha=0.3, label="Forecast horizon")
+        ax.legend()
+    plt.show()
+
+    # evaluate performance on multiple forecast horizons generated from the same test data)
+    splitter = ExpandingWindowSplitter(prediction_length=prediction_length, num_val_windows=3)
+    
+    # The evaluate method will measure the forecast accuracy using the last prediction_length 
+    # time steps of each validation split as a hold-out set
+    for window_idx, (train_split, val_split) in enumerate(splitter.split(test_data_back)):
+        score = predictor.evaluate(val_split)
+        print(f"Window {window_idx}: score = {score}")
