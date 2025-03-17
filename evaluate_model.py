@@ -8,6 +8,7 @@ from autogluon.timeseries import TimeSeriesPredictor
 import read_ned
 from train_model import gluonify, add_features
 from config import MODEL_DIR, HISTORICAL_DIR, TRAINING_DAYS
+import price_analysis
 
 from sklearn.metrics import mean_squared_error, r2_score, root_mean_squared_error, mean_absolute_error, mean_absolute_percentage_error
 from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
@@ -118,7 +119,15 @@ def load_test_data(use_full_context=False):
             # Precipitation
             'precipitation', 'precipitation_change_1h', 'precipitation_change_24h',
             "precipitation_rolling_mean_24h",  
-            "precipitation_rolling_mean_168h"
+            "precipitation_rolling_mean_168h",
+            
+            # Price features
+            #"elec_price", "gas_price", "gas_to_elec_ratio", 'elec_price_diff_1d','elec_price_diff_1w',
+            
+            # Energy crisis indicators
+            "energy_crisis",
+            "phase_pre_crisis", "phase_early_crisis", 
+            "phase_acute_crisis", "phase_peak_crisis", "phase_stabilization",
     ]
     
     # Create covariates DataFrame with all known features
@@ -146,6 +155,8 @@ def load_test_data(use_full_context=False):
     print(f"Pressure features: {sum('pressure' in col for col in covariates.columns)}")
     print(f"Other weather features: {sum(any(x in col for x in ['dew_point', 'feels_like', 'evapotranspiration', 'uv_index', 'sunshine']) for col in covariates.columns)}")
     print(f"Holiday/Vacation features: {sum(any(x in col for x in ['holiday', 'vacation']) for col in covariates.columns)}")
+    print(f"Price features: {sum(any(x in col for x in ['elec_price', 'gas_price', 'gas_to_elec_ratio']) for col in covariates.columns)}")
+    print(f"Energy crisis features: {sum(any(x in col for x in ['energy_crisis', 'phase_']) for col in covariates.columns)}")
     
     return context_data, test_data, covariates, test_data_with_features
 
@@ -235,7 +246,13 @@ def evaluate_forecast(use_full_context=False):
         'diffuse_radiation': test_data_with_features['diffuse_radiation'].values,
         'direct_normal_irradiance': test_data_with_features['direct_normal_irradiance'].values,
         'global_irradiance': test_data_with_features['global_irradiance'].values,
-        'terrestrial_radiation': test_data_with_features['terrestrial_radiation'].values
+        'terrestrial_radiation': test_data_with_features['terrestrial_radiation'].values,
+        # Price features
+        'elec_price': test_data_with_features['elec_price'].values if 'elec_price' in test_data_with_features.columns else np.nan,
+        'gas_price': test_data_with_features['gas_price'].values if 'gas_price' in test_data_with_features.columns else np.nan,
+        'gas_to_elec_ratio': test_data_with_features['gas_to_elec_ratio'].values if 'gas_to_elec_ratio' in test_data_with_features.columns else np.nan,
+        # Energy crisis features
+        'energy_crisis': test_data_with_features['energy_crisis'].values if 'energy_crisis' in test_data_with_features.columns else 0
     }, index=test_data.index)
     
     # Generate timestamp for all saved files
@@ -346,6 +363,43 @@ def evaluate_forecast(use_full_context=False):
         # Add correlation analysis
         temp_corr = error_tbl[['temperature', 'absolute_error']].corr().iloc[0,1]
         print(f"\nCorrelation between temperature and absolute error: {temp_corr:.3f}")
+    
+    # Add price analysis if available
+    if 'elec_price' in error_tbl.columns and not error_tbl['elec_price'].isna().all():
+        print("\nPrice Analysis:")
+        
+        # Analyze electricity price
+        print("Electricity Price Analysis:")
+        elec_bins = pd.qcut(error_tbl['elec_price'], q=4, labels=[
+            'Very Low', 'Low', 'High', 'Very High'
+        ])
+        
+        # Calculate statistics
+        elec_means = error_tbl.groupby(elec_bins, observed=True)['absolute_error'].mean()
+        elec_stds = error_tbl.groupby(elec_bins, observed=True)['absolute_error'].std()
+        elec_counts = error_tbl.groupby(elec_bins, observed=True)['absolute_error'].count()
+        
+        # Get price ranges
+        elec_ranges = pd.qcut(error_tbl['elec_price'], q=4, retbins=True)[1]
+        
+        print("\nError by electricity price range:")
+        for idx in elec_means.index:
+            price_range = f"€{elec_ranges[list(elec_means.index).index(idx)]:.3f} to €{elec_ranges[list(elec_means.index).index(idx)+1]:.3f}/kWh"
+            print(f"  {idx:9} ({price_range:20}): "
+                  f"MAE = {elec_means[idx]:.4f} ± "
+                  f"{elec_stds[idx]:.4f} "
+                  f"(n={int(elec_counts[idx])})")
+        
+        # Add correlation analysis
+        elec_corr = error_tbl[['elec_price', 'absolute_error']].corr().iloc[0,1]
+        print(f"\nCorrelation between electricity price and absolute error: {elec_corr:.3f}")
+        
+        # Energy crisis analysis
+        if 'energy_crisis' in error_tbl.columns and not error_tbl['energy_crisis'].isna().all():
+            crisis_means = error_tbl.groupby('energy_crisis')['absolute_error'].mean()
+            print("\nError by energy crisis period:")
+            print(f"  Pre-crisis period: MAE = {crisis_means.get(0, float('nan')):.4f}")
+            print(f"  During crisis:     MAE = {crisis_means.get(1, float('nan')):.4f}")
     
     # Add difference analysis to the summary
     print("\nDifference Analysis:")
