@@ -220,7 +220,7 @@ def handle_missing_data(df: pd.DataFrame) -> pd.DataFrame:
     full_index = pd.date_range(
         start=df.index.min(),
         end=df.index.max(),
-        freq='H'
+        freq='h'
     )
     
     # Reindex to expose missing timestamps
@@ -232,14 +232,14 @@ def handle_missing_data(df: pd.DataFrame) -> pd.DataFrame:
             # Circular interpolation for wind direction
             df[col] = df[col].interpolate(method='linear', limit=2)
             # For larger gaps, use nearest neighbor
-            df[col] = df[col].fillna(method='ffill').fillna(method='bfill')
+            df[col] = df[col].ffill().bfill()
         else:
             # Linear interpolation for small gaps
             df[col] = df[col].interpolate(method='linear', limit=2)
             # For larger gaps, use average of forward and backward fill
             if df[col].isnull().any():
-                ffill = df[col].fillna(method='ffill')
-                bfill = df[col].fillna(method='bfill')
+                ffill = df[col].ffill()
+                bfill = df[col].bfill()
                 df[col] = (ffill + bfill) / 2
     
     # Verify no missing values remain
@@ -282,7 +282,7 @@ def combine_meteo_data(output_path: Optional[Path] = None) -> pd.DataFrame:
         expected_dates = pd.date_range(
             start=combined_df.index.min(),
             end=combined_df.index.max(),
-            freq='H'
+            freq='h'
         )
         missing_dates = expected_dates.difference(combined_df.index)
         if len(missing_dates) > 0:

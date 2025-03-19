@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Dict, List, Optional, Union, Set
 import datetime
 from datetime import date
 import matplotlib.pyplot as plt
@@ -10,7 +10,7 @@ from dateutil.easter import easter
 from meteo_utils import combine_meteo_data
 import read_ned
 from config import MODEL_DIR, HISTORICAL_DIR, TRAINING_DAYS
-import price_analysis
+
 
 def get_dutch_holidays(year: int) -> Dict[date, str]:
     """Return Dutch national holidays for a given year."""
@@ -95,50 +95,44 @@ def get_dutch_school_vacations(year: int) -> Dict[str, List[Dict[str, date]]]:
     return vacations
 
 
-def add_features(df: pd.DataFrame) -> pd.DataFrame:
-    """   
-    This function adds a variety of features to the dataframe, including:
-        - Temporal features: hour, day of the week, month, and whether the day is a weekend.
-        - Holiday features: indicators for Dutch national holidays and adjacent days.
-        - Vacation features: indicators for Dutch school vacations, including summer vacations.
-        - Seasonal features: sine and cosine transformations of day of the year, week of the year, 
-        hour of the day, day of the week, month, and quarter.
-        - Emission factor features: differences, lags, and rolling means if the 'emissionfactor' 
-        column is present.
-        - Weather features: comprehensive set of weather variables from Open-Meteo API including
-        temperature, humidity, precipitation, wind, cloud cover, and solar radiation.
-        - Price features: electricity and gas price data with energy crisis indicators.
-
-    Parameters:
-        df (pd.DataFrame): The input DataFrame with a DateTime index and optional 'emissionfactor' column.
-
-    Returns:
-        pd.DataFrame: A new DataFrame with the original data and additional features.
-    
-    Notes:
-        - The function assumes the input DataFrame has a DateTime index.
-        - Weather data is expected to be available from Open-Meteo API through meteo_utils.py
-        - Price data is loaded from the price_analysis module
-        - The function modifies a copy of the input DataFrame to avoid altering the original data.
+def add_temporal_features(df: pd.DataFrame) -> pd.DataFrame:
     """
-        
-    df = df.copy()
+    Add basic temporal features to the dataframe.
     
-    # Add temporal features
+    Parameters:
+        df (pd.DataFrame): Input DataFrame with DateTime index
+        
+    Returns:
+        pd.DataFrame: DataFrame with added temporal features
+    """
+    df = df.copy()
     datetime_index = pd.to_datetime(df.index)
+    
+    # Basic temporal features
     df['hour'] = datetime_index.hour
     df['dayofweek'] = datetime_index.dayofweek
     df['month'] = datetime_index.month    
     df['is_weekend'] = df['dayofweek'].isin([5, 6]).astype(int)
     
-    # Add holiday features
+    return df
+
+
+def add_holiday_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Add Dutch holiday features to the dataframe.
+    
+    Parameters:
+        df (pd.DataFrame): Input DataFrame with DateTime index
+        
+    Returns:
+        pd.DataFrame: DataFrame with added holiday features
+    """
+    df = df.copy()
+    datetime_index = pd.to_datetime(df.index)
+    
+    # Initialize holiday columns
     df['is_holiday'] = 0
     df['is_holiday_adjacent'] = 0  # Day before/after holiday
-    
-    # Add vacation features
-    df['is_school_vacation'] = 0
-    df['is_summer_vacation'] = 0
-    df['vacation_type'] = 'none'
     
     # Get unique years in the data
     years = datetime_index.year.unique()
@@ -159,6 +153,30 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
             for adj_date in adjacent_dates:
                 adj_mask = (datetime_index.date == adj_date)
                 df.loc[adj_mask, 'is_holiday_adjacent'] = 1
+    
+    return df
+
+
+def add_vacation_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Add Dutch school vacation features to the dataframe.
+    
+    Parameters:
+        df (pd.DataFrame): Input DataFrame with DateTime index
+        
+    Returns:
+        pd.DataFrame: DataFrame with added vacation features
+    """
+    df = df.copy()
+    datetime_index = pd.to_datetime(df.index)
+    
+    # Initialize vacation columns
+    df['is_school_vacation'] = 0
+    df['is_summer_vacation'] = 0
+    df['vacation_type'] = 'none'
+    
+    # Get unique years in the data
+    years = datetime_index.year.unique()
     
     # Create vacation indicators
     for year in years:
@@ -181,7 +199,22 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
                 if vacation_type == 'summer':
                     df.loc[vacation_mask, 'is_summer_vacation'] = 1
     
-    # Add seasonal features
+    return df
+
+
+def add_seasonal_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Add seasonal cyclical features using sine and cosine transformations.
+    
+    Parameters:
+        df (pd.DataFrame): Input DataFrame with DateTime index and basic temporal features
+        
+    Returns:
+        pd.DataFrame: DataFrame with added seasonal features
+    """
+    df = df.copy()
+    datetime_index = pd.to_datetime(df.index)
+    
     # Day of year (1-366)
     df['day_of_year'] = datetime_index.dayofyear
     df['day_of_year_sin'] = np.sin(2 * np.pi * df['day_of_year'] / 365.25)
@@ -209,25 +242,52 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
     df['quarter_sin'] = np.sin(2 * np.pi * df['quarter'] / 4)
     df['quarter_cos'] = np.cos(2 * np.pi * df['quarter'] / 4)
     
-    # Add emission factor difference and lags
+    return df
+
+
+def add_emission_factor_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Add emission factor derived features if 'emissionfactor' column is present.
+    
+    Parameters:
+        df (pd.DataFrame): Input DataFrame with possible 'emissionfactor' column
+        
+    Returns:
+        pd.DataFrame: DataFrame with added emission factor features
+    """
+    df = df.copy()
+    
     if 'emissionfactor' in df.columns:
-        # ensures no emission factor features are added to forecast data,
-        # only for historical data
+        # Difference
         df['emissionfactor_diff'] = df['emissionfactor'].diff()
         
         # Add lag features for emission factor
-        lags = [1, 2, 3, 24, 48, 168]  # hours
+        lags = [1, 2, 3, 24, 48, 168]
         for lag in lags:
             df[f'emissionfactor_lag_{lag}h'] = df['emissionfactor'].shift(lag)
         
         # Add rolling means for emission factor
-        windows = [24, 168]  # 1 day, 1 week
+        windows = [24, 168]
         for window in windows:
             df[f'emissionfactor_rolling_mean_{window}h'] = (
                 df['emissionfactor'].rolling(window=window, min_periods=1).mean()
             )
     
-    # Add price and energy crisis features
+    return df
+
+
+def add_price_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Add electricity and gas price features including energy crisis indicators.
+    
+    Parameters:
+        df (pd.DataFrame): Input DataFrame with DateTime index
+        
+    Returns:
+        pd.DataFrame: DataFrame with added price features
+    """
+    df = df.copy()
+    
     try:
         # Load price features
         script_dir = MODEL_DIR.parent
@@ -266,12 +326,26 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
             else:
                 missing_cols = set(price_features_to_include) - set(price_df.columns)
                 print(f"Warning: Missing required price features: {missing_cols}")                
-        
+    
     except Exception as e:
         print(f"Warning: Could not add price features: {str(e)}")
         print("Continuing without price features...")
     
-    # Add weather features
+    return df
+
+
+def add_weather_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Add comprehensive weather features including temperature, precipitation, wind, etc.
+    
+    Parameters:
+        df (pd.DataFrame): Input DataFrame with DateTime index
+        
+    Returns:
+        pd.DataFrame: DataFrame with added weather features
+    """
+    df = df.copy()
+    
     try:        
         weather_df = combine_meteo_data()
         
@@ -280,37 +354,43 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
         print(f"ned_data period: {df.index.min()} to {df.index.max()}")
         print(f"weather_data period: {weather_df.index.min()} to {weather_df.index.max()}")
         
+        # Initialize an empty dict to collect all new features
+        feature_dict = {}
+        
         # Basic temperature features
         if 'temperature' in weather_df.columns:
-            # Use merge with validate to ensure data quality
-            df = pd.merge(df, weather_df[['temperature']], 
-                         left_index=True, right_index=True, 
-                         how='left',
-                         validate='1:1')  # Ensure one-to-one merge
+            # Get temperature data
+            temp_df = pd.merge(df, weather_df[['temperature']], 
+                             left_index=True, right_index=True, 
+                             how='left',
+                             validate='1:1')  # Ensure one-to-one merge
             
             # Check for unexpected NaN values
-            nan_count = df['temperature'].isna().sum()
+            nan_count = temp_df['temperature'].isna().sum()
             if nan_count > 0:
                 print(f"\nWarning: Found {nan_count} unexpected NaN values in temperature after merge")
+            
+            # Add temperature to feature dict
+            feature_dict['temperature'] = temp_df['temperature']
+            
+            # Temperature changes
+            feature_dict['temperature_change_1h'] = temp_df['temperature'].diff()
+            feature_dict['temperature_change_24h'] = temp_df['temperature'].diff(24)
+            
+            # Temperature lags
+            temp_lags = [1, 8, 9, 10, 20, 21, 22, 23, 24]
+            for lag in temp_lags:
+                feature_dict[f'temperature_lag_{lag}h'] = temp_df['temperature'].shift(lag)
+            
+            # Temperature rolling means
+            temp_windows = [24, 168]  # 1 day, 1 week
+            for window in temp_windows:
+                feature_dict[f'temperature_rolling_mean_{window}h'] = (
+                    temp_df['temperature'].rolling(window=window, min_periods=1).mean()
+                )
         else:
             print("Warning: temperature not found in weather data")
-            df['temperature'] = 0
-        
-        # Temperature changes
-        df['temperature_change_1h'] = df['temperature'].diff()
-        df['temperature_change_24h'] = df['temperature'].diff(24)
-        
-        # Temperature lags
-        temp_lags = [1, 8, 9, 10, 20, 21, 22, 23, 24]
-        for lag in temp_lags:
-            df[f'temperature_lag_{lag}h'] = df['temperature'].shift(lag)
-        
-        # Temperature rolling means
-        temp_windows = [24, 168]  # 1 day, 1 week
-        for window in temp_windows:
-            df[f'temperature_rolling_mean_{window}h'] = (
-                df['temperature'].rolling(window=window, min_periods=1).mean()
-            )
+            feature_dict['temperature'] = 0
         
         # Additional weather features from open-meteo
         weather_features = {
@@ -339,36 +419,126 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
         }
         
         for source_col, target_col in weather_features.items():
-            if source_col in weather_df.columns:                
-                temp_df = pd.merge(df, weather_df[[source_col]],
-                                 left_index=True, right_index=True,
-                                 how='left',
-                                 validate='1:1')
+            if source_col in weather_df.columns:
+                # Get the feature data from weather_df
+                feature_data = pd.merge(df, weather_df[[source_col]],
+                                      left_index=True, right_index=True,
+                                      how='left',
+                                      validate='1:1')[source_col]
                 
                 if source_col == 'is_day':
                     # Boolean feature
-                    df[target_col] = temp_df[source_col]
+                    feature_dict[target_col] = feature_data
                 else:
                     # Numeric features
-                    df[target_col] = temp_df[source_col]
+                    feature_dict[target_col] = feature_data
                     
                     # Add changes except for boolean features
-                    df[f'{target_col}_change_1h'] = df[target_col].diff()
-                    df[f'{target_col}_change_24h'] = df[target_col].diff(24)
+                    feature_dict[f'{target_col}_change_1h'] = feature_data.diff()
+                    feature_dict[f'{target_col}_change_24h'] = feature_data.diff(24)
                     
                     # Add rolling means
                     for window in temp_windows:
-                        df[f'{target_col}_rolling_mean_{window}h'] = (
-                            df[target_col].rolling(window=window, min_periods=1).mean()
+                        feature_dict[f'{target_col}_rolling_mean_{window}h'] = (
+                            feature_data.rolling(window=window, min_periods=1).mean()
                         )
             else:
                 print(f"Warning: {source_col} not found in weather data")
+        
+        # Combine the original DataFrame with all new features at once
+        all_features_df = pd.DataFrame(feature_dict, index=df.index)
+        result_df = pd.concat([df, all_features_df], axis=1)
+        
+        return result_df
             
     except Exception as e:
         print(f"Warning: Could not add weather features: {str(e)}")
         print("Continuing without weather features...")
 
     return df
+
+
+def add_features(
+    df: pd.DataFrame, 
+    feature_sets: Union[str, Set[str]] = 'all'
+) -> pd.DataFrame:
+    """
+    Combine multiple feature sets based on the specified options.
+    
+    Parameters:
+        df (pd.DataFrame): Input DataFrame with DateTime index
+        feature_sets (Union[str, Set[str]]): Specification of feature sets to include.
+            - 'all': Include all feature sets
+            - Set of strings: Only include specified feature sets
+              Options: {'temporal', 'holiday', 'vacation', 'seasonal', 
+                       'emission', 'price', 'weather'}
+    
+    Returns:
+        pd.DataFrame: DataFrame with selected features added
+    
+    Example:
+        # Include all features
+        df_all_features = add_features(df, 'all')
+        
+        # Include only temporal and seasonal features
+        df_selected = add_features(df, {'temporal', 'seasonal'})
+    """
+    df = df.copy()
+    
+    # Define all available feature sets
+    all_feature_sets = {
+        'temporal', 'holiday', 'vacation', 'seasonal', 
+        'emission', 'price', 'weather'
+    }
+    
+    # Determine which feature sets to include
+    if feature_sets == 'all':
+        selected_feature_sets = all_feature_sets
+    else:
+        # Validate feature sets
+        if not isinstance(feature_sets, set):
+            raise ValueError("feature_sets must be 'all' or a set of feature types")
+        
+        invalid_sets = feature_sets - all_feature_sets
+        if invalid_sets:
+            raise ValueError(f"Invalid feature sets: {invalid_sets}. "
+                            f"Valid options are: {all_feature_sets}")
+        
+        selected_feature_sets = feature_sets
+    
+    # Apply selected feature transformations
+    if 'temporal' in selected_feature_sets:
+        df = add_temporal_features(df)
+    
+    if 'holiday' in selected_feature_sets:
+        df = add_holiday_features(df)
+    
+    if 'vacation' in selected_feature_sets:
+        df = add_vacation_features(df)
+    
+    if 'seasonal' in selected_feature_sets and 'temporal' in selected_feature_sets:
+        # Seasonal features depend on temporal features
+        df = add_seasonal_features(df)
+    elif 'seasonal' in selected_feature_sets:
+        # If temporal features weren't selected but seasonal were,
+        # we need to add temporal first
+        temp_df = add_temporal_features(df)
+        df = add_seasonal_features(temp_df)
+        # Keep only the seasonal features, not the temporal ones
+        temporal_cols = ['hour', 'dayofweek', 'month', 'is_weekend']
+        df = df.drop(columns=[col for col in temporal_cols if col in df.columns])
+    
+    if 'emission' in selected_feature_sets:
+        df = add_emission_factor_features(df)
+    
+    if 'price' in selected_feature_sets:
+        df = add_price_features(df)
+    
+    if 'weather' in selected_feature_sets:
+        df = add_weather_features(df)
+    
+    return df
+
 
 def gluonify(df: pd.DataFrame) -> TimeSeriesDataFrame:
     """Convert pandas DataFrame to AutoGluon TimeSeriesDataFrame format."""
@@ -434,12 +604,16 @@ if __name__ == "__main__":
     test_data = ned_data[-7*24:]   # Last week reserved for testing
 
     # Add features - training data gets all features
-    train_data_with_features = add_features(train_data)
+    
+    # use all features
+    train_data_with_features = add_features(train_data, 'all')
+    # train_data_with_features = add_features(train_data, {'temporal', 'seasonal', 'weather'})
+    
     train_data_with_features.head()
     print("Columns train_data_with_features:", train_data_with_features.columns.tolist())
-    
+      
     # Test data only gets features available in forecast horizon
-    test_data_with_features = add_features(test_data)
+    test_data_with_features = add_features(test_data, 'all')
 
     # Convert to AutoGluon format
     gluon_train_data = gluonify(train_data_with_features)
@@ -514,8 +688,8 @@ if __name__ == "__main__":
     ).fit(
         train_data      = gluon_train_data,
         presets         = "best_quality",
-        time_limit      = 1000,
-        num_val_windows = 3,  # This will reduce the likelihood of overfitting
+        time_limit      = 100,
+        num_val_windows = 3,
     )    
 
     leaderboard = predictor.leaderboard(gluon_train_data, silent=True)
