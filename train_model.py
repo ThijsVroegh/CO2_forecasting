@@ -1,121 +1,82 @@
-from typing import Dict, List, Optional, Union, Set
+from typing import Dict, List, Union, Set
 import datetime
 from datetime import date
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 from autogluon.timeseries import TimeSeriesDataFrame, TimeSeriesPredictor
-from autogluon.common import space
-from dateutil.easter import easter
+from workalendar.europe import Netherlands, NetherlandsWithSchoolHolidays
+
 from meteo_utils import combine_meteo_data
 import read_ned
 from config import MODEL_DIR, HISTORICAL_DIR, TRAINING_DAYS
 
 
+
 def get_dutch_holidays(year: int) -> Dict[date, str]:
-    """Return Dutch national holidays for a given year."""
-    easter_date = easter(year)
+    """Return Dutch national holidays for a given year.
     
-    holidays = {
-        # Fixed dates
-        date(year, 1, 1): "Nieuwjaarsdag",  
-        date(year, 4, 27): "Koningsdag",    
-        date(year, 5, 5): "Bevrijdingsdag", 
-        date(year, 12, 25): "Eerste Kerstdag", 
-        date(year, 12, 26): "Tweede Kerstdag", 
-                
-        easter_date: "Eerste Paasdag",
-        easter_date + pd.Timedelta(days=1): "Tweede Paasdag", 
-        easter_date + pd.Timedelta(days=39): "Hemelvaartsdag", 
-        easter_date + pd.Timedelta(days=49): "Eerste Pinksterdag",
-        easter_date + pd.Timedelta(days=50): "Tweede Pinksterdag",
-    }
+    Args:
+        year: The year to get holidays for
+        
+    Returns:
+        Dictionary mapping holiday dates to holiday names
+    """
+    cal = Netherlands()
+    holidays = {}
+    
+    # Get holidays
+    for holiday_date, holiday_name in cal.holidays(year):
+        holidays[holiday_date] = holiday_name    
     return holidays
 
 
 def get_dutch_school_vacations(year: int) -> Dict[str, List[Dict[str, date]]]:
     """Return Dutch school vacation periods for a given year.
     
-    Note: These are approximate dates, actual dates may vary by region and year.
-    Returns periods for North, Middle, and South regions.
-    """
-    vacations = {
-        # Christmas vacation (2 weeks, all regions same dates)
-        "christmas": {
-            "all": {
-                "start": date(year, 12, 25),
-                "end": date(year + 1, 1, 9)
-            }
-        },
-        # Spring vacation (1 week, different per region)
-        "spring": {
-            "north": {
-                "start": date(year, 2, 19),
-                "end": date(year, 2, 27)
-            },
-            "middle": {
-                "start": date(year, 2, 26),
-                "end": date(year, 3, 6)
-            },
-            "south": {
-                "start": date(year, 2, 19),
-                "end": date(year, 2, 27)
-            }
-        },
-        # May vacation (1-2 weeks)
-        "may": {
-            "all": {
-                "start": date(year, 4, 29),
-                "end": date(year, 5, 7)
-            }
-        },
-        # Summer vacation (6 weeks, different per region)
-        "summer": {
-            "north": {
-                "start": date(year, 7, 22),
-                "end": date(year, 9, 3)
-            },
-            "middle": {
-                "start": date(year, 7, 8),
-                "end": date(year, 8, 20)
-            },
-            "south": {
-                "start": date(year, 7, 15),
-                "end": date(year, 8, 27)
-            }
-        },
-        # Autumn vacation (1 week)
-        "autumn": {
-            "all": {
-                "start": date(year, 10, 14),
-                "end": date(year, 10, 22)
-            }
-        }
-    }
-    return vacations
-
-
-def add_temporal_features(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Add basic temporal features to the dataframe.
-    
-    Parameters:
-        df (pd.DataFrame): Input DataFrame with DateTime index
+    Args:
+        year: The year to get vacations for
         
     Returns:
-        pd.DataFrame: DataFrame with added temporal features
+        Dictionary with vacation periods by region
     """
-    df = df.copy()
-    datetime_index = pd.to_datetime(df.index)
+    # Create instances for each region
+    regions = {
+        "north": NetherlandsWithSchoolHolidays(region="north"),
+        "middle": NetherlandsWithSchoolHolidays(region="middle"),
+        "south": NetherlandsWithSchoolHolidays(region="south")
+    }
     
-    # Basic temporal features
-    df['hour'] = datetime_index.hour
-    df['dayofweek'] = datetime_index.dayofweek
-    df['month'] = datetime_index.month    
-    df['is_weekend'] = df['dayofweek'].isin([5, 6]).astype(int)
+    # Initialize dictionary
+    vacations = {}
     
-    return df
-
+    # Process each region
+    for region_name, cal in regions.items():
+        # Get all variable days (includes school holidays)
+        all_days = cal.get_variable_days(year)
+        
+        # Filter for school holidays only and group by type
+        for day_date, day_name in all_days:
+            # Extract vacation type from name (e.g., "Fall holiday" -> "fall")
+            if "holiday" in day_name.lower():
+                vacation_type = day_name.lower().replace(" holiday", "")
+                
+                if vacation_type not in vacations:
+                    vacations[vacation_type] = {}
+                
+                if region_name not in vacations[vacation_type]:
+                    # Initialize with this date as both start and end
+                    vacations[vacation_type][region_name] = {
+                        'start': day_date,
+                        'end': day_date
+                    }
+                else:
+                    # Update end date if this date is later
+                    if day_date < vacations[vacation_type][region_name]['start']:
+                        vacations[vacation_type][region_name]['start'] = day_date
+                    if day_date > vacations[vacation_type][region_name]['end']:
+                        vacations[vacation_type][region_name]['end'] = day_date
+    return vacations
 
 def add_holiday_features(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -132,7 +93,9 @@ def add_holiday_features(df: pd.DataFrame) -> pd.DataFrame:
     
     # Initialize holiday columns
     df['is_holiday'] = 0
-    df['is_holiday_adjacent'] = 0  # Day before/after holiday
+    
+    # Store the name of the holiday
+    df['holiday_name'] = ''
     
     # Get unique years in the data
     years = datetime_index.year.unique()
@@ -144,22 +107,25 @@ def add_holiday_features(df: pd.DataFrame) -> pd.DataFrame:
             # Mark holidays
             holiday_mask = (datetime_index.date == holiday_date)
             df.loc[holiday_mask, 'is_holiday'] = 1
-            
-            # Mark adjacent days (day before and after)
-            adjacent_dates = [
-                holiday_date - pd.Timedelta(days=1),
-                holiday_date + pd.Timedelta(days=1)
-            ]
-            for adj_date in adjacent_dates:
-                adj_mask = (datetime_index.date == adj_date)
-                df.loc[adj_mask, 'is_holiday_adjacent'] = 1
+            df.loc[holiday_mask, 'holiday_name'] = holiday_name
+        
+    df['is_working_day'] = 0
+    cal = Netherlands()
     
+    for date_idx in pd.date_range(df.index.min().date(), df.index.max().date()):
+        # Only process each date once to improve performance
+        mask = (datetime_index.date == date_idx.date())
+        if mask.any():
+            is_working = cal.is_working_day(date_idx.date())
+            df.loc[mask, 'is_working_day'] = int(is_working)    
     return df
 
 
 def add_vacation_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     Add Dutch school vacation features to the dataframe.
+    For regions, we use a combined approach where a day is marked as vacation
+    if it is a vacation in any region.
     
     Parameters:
         df (pd.DataFrame): Input DataFrame with DateTime index
@@ -192,12 +158,41 @@ def add_vacation_features(df: pd.DataFrame) -> pd.DataFrame:
                     (datetime_index.date >= start_date) & 
                     (datetime_index.date <= end_date)
                 )
+                
+                # If a day is already marked as vacation, keep the existing vacation_type
+                # unless the new one is 'summer' which takes precedence
+                new_vacation_days = (
+                    (vacation_mask) & 
+                    ((df['vacation_type'] == 'none') | 
+                     (vacation_type == 'summer' and df['vacation_type'] != 'summer'))
+                )
+                
                 df.loc[vacation_mask, 'is_school_vacation'] = 1
-                df.loc[vacation_mask, 'vacation_type'] = vacation_type
+                df.loc[new_vacation_days, 'vacation_type'] = vacation_type
                 
                 # Mark summer vacation specifically
                 if vacation_type == 'summer':
-                    df.loc[vacation_mask, 'is_summer_vacation'] = 1
+                    df.loc[vacation_mask, 'is_summer_vacation'] = 1    
+    return df
+
+
+def add_temporal_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Add basic temporal features to the dataframe.
+    
+    Parameters:
+        df (pd.DataFrame): Input DataFrame with DateTime index
+        
+    Returns:
+        pd.DataFrame: DataFrame with added temporal features
+    """
+    df = df.copy()
+    datetime_index = pd.to_datetime(df.index)
+        
+    df['hour'] = datetime_index.hour
+    df['dayofweek'] = datetime_index.dayofweek
+    df['month'] = datetime_index.month    
+    df['is_weekend'] = df['dayofweek'].isin([5, 6]).astype(int)
     
     return df
 
@@ -257,16 +252,15 @@ def add_emission_factor_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     df = df.copy()
     
-    if 'emissionfactor' in df.columns:
-        # Difference
+    if 'emissionfactor' in df.columns:        
         df['emissionfactor_diff'] = df['emissionfactor'].diff()
         
-        # Add lag features for emission factor
+        # lag features for emission factor based on ACF plot
         lags = [1, 2, 3, 24, 48, 168]
         for lag in lags:
             df[f'emissionfactor_lag_{lag}h'] = df['emissionfactor'].shift(lag)
         
-        # Add rolling means for emission factor
+        # rolling means for emission factor
         windows = [24, 168]
         for window in windows:
             df[f'emissionfactor_rolling_mean_{window}h'] = (
@@ -289,7 +283,6 @@ def add_price_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     
     try:
-        # Load price features
         script_dir = MODEL_DIR.parent
         price_features_file = script_dir / "data" / "price_features.csv"
         
@@ -306,16 +299,15 @@ def add_price_features(df: pd.DataFrame) -> pd.DataFrame:
             # Only include base features that would be known for future forecast periods
             price_features_to_include = [
                 'elec_price', 'gas_price', 'gas_to_elec_ratio',
-                #'elec_price_diff_1d','elec_price_diff_1w',
-                'energy_crisis','phase_pre_crisis', 'phase_early_crisis','phase_acute_crisis', 
-                'phase_peak_crisis', 'phase_stabilization'
+                'elec_price_diff_1d','elec_price_diff_1w',
+                'energy_crisis','phase_pre_crisis', 'phase_early_crisis',
+                'phase_acute_crisis', 'phase_peak_crisis', 'phase_stabilization'
             ]
             
             if set(price_features_to_include).issubset(price_df.columns):                
                 df = pd.merge(df, price_df[price_features_to_include], 
                              left_index=True, right_index=True, 
-                             how='left', 
-                             validate='1:1')  # Ensure one-to-one merge
+                             how='left', validate='1:1')  # Ensure one-to-one merge
                 
                 # Check for NaN values from merge
                 nan_count = df['elec_price'].isna().sum()
@@ -346,7 +338,7 @@ def add_weather_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     df = df.copy()
     
-    try:        
+    try:
         weather_df = combine_meteo_data()
         
         # Verify data coverage
@@ -354,7 +346,7 @@ def add_weather_features(df: pd.DataFrame) -> pd.DataFrame:
         print(f"ned_data period: {df.index.min()} to {df.index.max()}")
         print(f"weather_data period: {weather_df.index.min()} to {weather_df.index.max()}")
         
-        # Initialize an empty dict to collect all new features
+        # Initialize dict to collect all new features
         feature_dict = {}
         
         # Basic temperature features
@@ -486,10 +478,7 @@ def add_features(
     df = df.copy()
     
     # Define all available feature sets
-    all_feature_sets = {
-        'temporal', 'holiday', 'vacation', 'seasonal', 
-        'emission', 'price', 'weather'
-    }
+    all_feature_sets = {'temporal', 'holiday', 'vacation', 'seasonal', 'emission', 'price', 'weather'}
     
     # Determine which feature sets to include
     if feature_sets == 'all':
@@ -595,31 +584,32 @@ def load_training_data() -> pd.DataFrame:
 
 
 if __name__ == "__main__":
-    # Load data with configured training period
+    
     ned_data = load_training_data()   
     print("Columns ned_data:", ned_data.columns.tolist())
     
     # Split into train and test sets
-    train_data = ned_data[:-7*24]  # All data except last week available in the dataset 
+    train_data = ned_data[:-7*24]  # All data except last week available in the dataset
     test_data = ned_data[-7*24:]   # Last week reserved for testing
 
-    # Add features - training data gets all features
+    # Add features
     
-    # use all features
-    train_data_with_features = add_features(train_data, 'all')
-    # train_data_with_features = add_features(train_data, {'temporal', 'seasonal', 'weather'})
+    # use all available features
+    #train_data_with_features = add_features(train_data, 'all')
     
+    # exclude price features
+    train_data_with_features = add_features(train_data, {'temporal', 'holiday', 'vacation', 'seasonal', 'emission', 'weather'})
     train_data_with_features.head()
-    print("Columns train_data_with_features:", train_data_with_features.columns.tolist())
-      
-    # Test data only gets features available in forecast horizon
-    test_data_with_features = add_features(test_data, 'all')
-
+    print("Columns train_data_with_features:", train_data_with_features.columns.tolist())     
+    
     # Convert to AutoGluon format
     gluon_train_data = gluonify(train_data_with_features)
-    gluon_test_data = gluonify(test_data_with_features)
     
-    # known_covariates are vars that will be "known" in the forecasting horizon
+    # Print feature names to verify lag features are present
+    print("\nFeatures used in training:")
+    print(gluon_train_data.columns.tolist())
+    
+    # known_covariates are vars that will be known in the forecasting horizon
     predictor = TimeSeriesPredictor(
         prediction_length=7*24,
         freq="1h",
@@ -649,7 +639,7 @@ if __name__ == "__main__":
             # Temperature rolling means
             'temperature_rolling_mean_24h', 'temperature_rolling_mean_168h',            
             # Holiday features
-            "is_holiday", "is_holiday_adjacent",
+            "is_holiday", "is_working_day",
             # Vacation features
             "is_school_vacation", "is_summer_vacation", "vacation_type",
             # Wind features
@@ -681,26 +671,22 @@ if __name__ == "__main__":
             # Price features
             #"elec_price", "gas_price", "gas_to_elec_ratio", 'elec_price_diff_1d','elec_price_diff_1w',
             # Energy crisis indicators
-            "energy_crisis",
-            "phase_pre_crisis", "phase_early_crisis", 
-            "phase_acute_crisis", "phase_peak_crisis", "phase_stabilization",
+            # "energy_crisis",
+            # "phase_pre_crisis", "phase_early_crisis", 
+            # "phase_acute_crisis", "phase_peak_crisis", "phase_stabilization",
             ]
     ).fit(
         train_data      = gluon_train_data,
         presets         = "best_quality",
-        time_limit      = 100,
+        time_limit      = 1000,
         num_val_windows = 3,
     )    
 
     leaderboard = predictor.leaderboard(gluon_train_data, silent=True)
     print("\nModel Leaderboard:")
     print(leaderboard)
-    
-    # Print feature names to verify lag features were added
-    print("\nFeatures used in training:")
-    print(gluon_train_data.columns.tolist())
-    
-    # Calculate and plot feature importance ----
+            
+    # Feature importance ----
     compute_importance = False  # Set to True to compute feature importance
     
     if compute_importance:
@@ -729,7 +715,7 @@ if __name__ == "__main__":
                        dpi=600, bbox_inches='tight')
             
             # Show plot only after saving
-            plt.show() 
+            plt.show()
             
             plt.close()
             

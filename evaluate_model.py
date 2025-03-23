@@ -8,7 +8,6 @@ from autogluon.timeseries import TimeSeriesPredictor
 import read_ned
 from train_model import gluonify, add_features
 from config import MODEL_DIR, HISTORICAL_DIR, TRAINING_DAYS
-import price_analysis
 
 from sklearn.metrics import mean_squared_error, r2_score, root_mean_squared_error, mean_absolute_error, mean_absolute_percentage_error
 from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
@@ -39,29 +38,30 @@ def load_test_data(use_full_context=False):
             ].copy()
             print("Using all available data as context within training period")
         else:
-            # Use only last 4 weeks as context
-            context_data = ned_data[-5*7*24:-7*24].copy()
-            print("Using last 4 weeks as context")
+            # Use only last 2 weeks as context
+            # this range selects the period from 2 weeks ago up to 1 week ago,
+            # with the last week being reserved for the forecast horizon
+            context_data = ned_data[-3*7*24:-7*24].copy()
+            print("Using last 2 weeks as context")
     else:
         # Original behavior when TRAINING_DAYS is None
         if use_full_context:
             context_data = ned_data[:-7*24].copy()
             print("Using full historical data as context")
         else:
-            context_data = ned_data[-5*7*24:-7*24].copy()
-            print("Using last 4 weeks as context")
+            context_data = ned_data[-3*7*24:-7*24].copy()
+            print("Using last 2 weeks as context")
     
     # Add features to context data (including emission factor features)
-    context_data = add_features(context_data)
+    context_data = add_features(context_data,{'temporal', 'holiday', 'vacation', 'seasonal', 'emission', 'weather'})
     print("\nContext data features:")
     print("Emission factor features:", [col for col in context_data.columns if 'emissionfactor' in col])
     
     # test data
     test_data = ned_data[-7*24:].copy()
-    test_data_with_features = add_features(test_data)       
+    test_data_with_features = add_features(test_data,{'temporal', 'holiday', 'vacation', 'seasonal', 'emission', 'weather'})
     
-    # Extract known covariates, i.e. all features that will be known during prediction/ forecasting 
-    # horizon
+    # Extract known-covariates; all features that will be known during forecasting
     known_features = [
             # Renewable energy volumes
             "volume_sun", "volume_land-wind", "volume_sea-wind",
@@ -86,7 +86,7 @@ def load_test_data(use_full_context=False):
             # Temperature rolling means
             'temperature_rolling_mean_24h', 'temperature_rolling_mean_168h',            
             # Holiday features
-            "is_holiday", "is_holiday_adjacent",
+            "is_holiday", "is_working_day",
             # Vacation features
             "is_school_vacation", "is_summer_vacation", "vacation_type",
             # Wind features
@@ -125,9 +125,9 @@ def load_test_data(use_full_context=False):
             #"elec_price", "gas_price", "gas_to_elec_ratio", 'elec_price_diff_1d','elec_price_diff_1w',
             
             # Energy crisis indicators
-            "energy_crisis",
-            "phase_pre_crisis", "phase_early_crisis", 
-            "phase_acute_crisis", "phase_peak_crisis", "phase_stabilization",
+            # "energy_crisis",
+            # "phase_pre_crisis", "phase_early_crisis", 
+            # "phase_acute_crisis", "phase_peak_crisis", "phase_stabilization",
     ]
     
     # Create covariates DataFrame with all known features
@@ -155,8 +155,8 @@ def load_test_data(use_full_context=False):
     print(f"Pressure features: {sum('pressure' in col for col in covariates.columns)}")
     print(f"Other weather features: {sum(any(x in col for x in ['dew_point', 'feels_like', 'evapotranspiration', 'uv_index', 'sunshine']) for col in covariates.columns)}")
     print(f"Holiday/Vacation features: {sum(any(x in col for x in ['holiday', 'vacation']) for col in covariates.columns)}")
-    print(f"Price features: {sum(any(x in col for x in ['elec_price', 'gas_price', 'gas_to_elec_ratio']) for col in covariates.columns)}")
-    print(f"Energy crisis features: {sum(any(x in col for x in ['energy_crisis', 'phase_']) for col in covariates.columns)}")
+    #print(f"Price features: {sum(any(x in col for x in ['elec_price', 'gas_price', 'gas_to_elec_ratio']) for col in covariates.columns)}")
+    #print(f"Energy crisis features: {sum(any(x in col for x in ['energy_crisis', 'phase_']) for col in covariates.columns)}")
     
     return context_data, test_data, covariates, test_data_with_features
 
@@ -248,11 +248,11 @@ def evaluate_forecast(use_full_context=False):
         'global_irradiance': test_data_with_features['global_irradiance'].values,
         'terrestrial_radiation': test_data_with_features['terrestrial_radiation'].values,
         # Price features
-        'elec_price': test_data_with_features['elec_price'].values if 'elec_price' in test_data_with_features.columns else np.nan,
-        'gas_price': test_data_with_features['gas_price'].values if 'gas_price' in test_data_with_features.columns else np.nan,
-        'gas_to_elec_ratio': test_data_with_features['gas_to_elec_ratio'].values if 'gas_to_elec_ratio' in test_data_with_features.columns else np.nan,
+        #'elec_price': test_data_with_features['elec_price'].values if 'elec_price' in test_data_with_features.columns else np.nan,
+        #'gas_price': test_data_with_features['gas_price'].values if 'gas_price' in test_data_with_features.columns else np.nan,
+        #'gas_to_elec_ratio': test_data_with_features['gas_to_elec_ratio'].values if 'gas_to_elec_ratio' in test_data_with_features.columns else np.nan,
         # Energy crisis features
-        'energy_crisis': test_data_with_features['energy_crisis'].values if 'energy_crisis' in test_data_with_features.columns else 0
+        #'energy_crisis': test_data_with_features['energy_crisis'].values if 'energy_crisis' in test_data_with_features.columns else 0
     }, index=test_data.index)
     
     # Generate timestamp for all saved files
@@ -491,13 +491,13 @@ def evaluate_forecast(use_full_context=False):
 
 if __name__ == "__main__":
     try:
-        # First evaluate with 4 weeks context
+        # evaluate with 4 weeks context
         print("\n=== Evaluating with 4 weeks context ===")
         test_data, prediction = evaluate_forecast(use_full_context=False)
         
-        # Then evaluate with full historical context
-        print("\n=== Evaluating with full historical context ===")
-        test_data, prediction = evaluate_forecast(use_full_context=True)
+        # evaluate with full historical context
+        #print("\n=== Evaluating with full historical context ===")
+        #test_data, prediction = evaluate_forecast(use_full_context=True)
         
     except Exception as e:
         print(f"Error during evaluation: {str(e)}") 
