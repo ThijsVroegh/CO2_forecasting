@@ -156,16 +156,17 @@ def fetch_forecast_weather() -> pd.DataFrame:
     response = openmeteo.weather_api(url, params=params)[0]
     hourly = response.Hourly()
     
-    # Create DataFrame with proper datetime index (timezone-aware)
-    df = pd.DataFrame(index=pd.date_range(
-        start=pd.to_datetime(hourly.Time(), unit="s"),
-        end=pd.to_datetime(hourly.TimeEnd(), unit="s"),
-        freq=pd.Timedelta(seconds=hourly.Interval()),
-        inclusive="left",
-        tz='Europe/Amsterdam'  # Specify timezone during creation
-    ))
+    # Create data dictionary with proper date range
+    data = {
+        "datetime": pd.date_range(
+            start=pd.to_datetime(hourly.Time(), unit="s", utc=True),
+            end=pd.to_datetime(hourly.TimeEnd(), unit="s", utc=True),
+            freq=pd.Timedelta(seconds=hourly.Interval()),
+            inclusive="left"
+        )
+    }
     
-    # Add variables with proper column names (same mapping as historical data)
+    # Add variables with proper column names
     column_mapping = {
         "temperature_2m": "temperature",
         "relative_humidity_2m": "humidity",
@@ -193,7 +194,16 @@ def fetch_forecast_weather() -> pd.DataFrame:
     }
     
     for i, (api_name, df_name) in enumerate(column_mapping.items()):
-        df[df_name] = hourly.Variables(i).ValuesAsNumpy()
+        data[df_name] = hourly.Variables(i).ValuesAsNumpy()
+    
+    # Create DataFrame using the data dictionary
+    df = pd.DataFrame(data=data)
+    
+    # Set datetime as index
+    df = df.set_index("datetime")
+    
+    # Convert the index to timezone-aware Europe/Amsterdam
+    df.index = df.index.tz_convert('Europe/Amsterdam')
     
     # Convert to Dutch local time format (timezone-naive)
     df = convert_to_nl_time(df)
