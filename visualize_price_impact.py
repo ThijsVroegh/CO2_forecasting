@@ -3,14 +3,14 @@ Visualize the relationship between electricity prices and CO2 emission factors
 """
 
 import os
+import warnings
+import matplotlib.dates as mdates
+import glob
+import re
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-import glob
-import warnings
-import matplotlib.dates as mdates
 from scipy import stats
-import re
 
 # Set the style
 plt.style.use('seaborn-v0_8')

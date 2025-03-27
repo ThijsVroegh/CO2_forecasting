@@ -1,6 +1,5 @@
 import pandas as pd
 import matplotlib.pyplot as plt
-#from pathlib import Path
 import datetime
 
 from config import FORECAST_DIR

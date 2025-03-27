@@ -12,7 +12,6 @@ import read_ned
 from config import MODEL_DIR, HISTORICAL_DIR, TRAINING_DAYS
 
 
-
 def get_dutch_holidays(year: int) -> Dict[date, str]:
     """Return Dutch national holidays for a given year.
     
@@ -609,12 +608,12 @@ if __name__ == "__main__":
     print("\nFeatures used in training:")
     print(gluon_train_data.columns.tolist())
     
-    # known_covariates are vars that will be known in the forecasting horizon
     predictor = TimeSeriesPredictor(
         prediction_length=7*24,
         freq="1h",
         target="emissionfactor",
         path=str(MODEL_DIR),
+        # known_covariates are variables which are known in the forecasting horizon
         known_covariates_names=[
             # Renewable energy volumes
             "volume_sun", "volume_land-wind", "volume_sea-wind",

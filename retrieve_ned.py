@@ -2,7 +2,6 @@ import datetime
 import json
 import os
 from typing import Literal
-
 import pandas
 import requests
 

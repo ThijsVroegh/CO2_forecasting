@@ -5,7 +5,6 @@ from retry_requests import retry
 from pathlib import Path
 from typing import Optional, Dict
 import datetime
-import pytz
 
 # def convert_to_nl_time(df: pd.DataFrame) -> pd.DataFrame:
 #     """Convert DataFrame index to Dutch local time format matching ned.nl data.
@@ -156,16 +155,17 @@ def fetch_forecast_weather() -> pd.DataFrame:
     response = openmeteo.weather_api(url, params=params)[0]
     hourly = response.Hourly()
     
-    # Create DataFrame with proper datetime index (timezone-aware)
-    df = pd.DataFrame(index=pd.date_range(
-        start=pd.to_datetime(hourly.Time(), unit="s"),
-        end=pd.to_datetime(hourly.TimeEnd(), unit="s"),
-        freq=pd.Timedelta(seconds=hourly.Interval()),
-        inclusive="left",
-        tz='Europe/Amsterdam'  # Specify timezone during creation
-    ))
+    # Create data dictionary with proper date range
+    data = {
+        "datetime": pd.date_range(
+            start=pd.to_datetime(hourly.Time(), unit="s", utc=True),
+            end=pd.to_datetime(hourly.TimeEnd(), unit="s", utc=True),
+            freq=pd.Timedelta(seconds=hourly.Interval()),
+            inclusive="left"
+        )
+    }
     
-    # Add variables with proper column names (same mapping as historical data)
+    # Add variables with proper column names
     column_mapping = {
         "temperature_2m": "temperature",
         "relative_humidity_2m": "humidity",
@@ -193,7 +193,16 @@ def fetch_forecast_weather() -> pd.DataFrame:
     }
     
     for i, (api_name, df_name) in enumerate(column_mapping.items()):
-        df[df_name] = hourly.Variables(i).ValuesAsNumpy()
+        data[df_name] = hourly.Variables(i).ValuesAsNumpy()
+    
+    # Create DataFrame using the data dictionary
+    df = pd.DataFrame(data=data)
+    
+    # Set datetime as index
+    df = df.set_index("datetime")
+    
+    # Convert the index to timezone-aware Europe/Amsterdam
+    df.index = df.index.tz_convert('Europe/Amsterdam')
     
     # Convert to Dutch local time format (timezone-naive)
     df = convert_to_nl_time(df)
@@ -220,7 +229,7 @@ def handle_missing_data(df: pd.DataFrame) -> pd.DataFrame:
     full_index = pd.date_range(
         start=df.index.min(),
         end=df.index.max(),
-        freq='h'
+        freq='H'
     )
     
     # Reindex to expose missing timestamps
@@ -232,14 +241,14 @@ def handle_missing_data(df: pd.DataFrame) -> pd.DataFrame:
             # Circular interpolation for wind direction
             df[col] = df[col].interpolate(method='linear', limit=2)
             # For larger gaps, use nearest neighbor
-            df[col] = df[col].ffill().bfill()
+            df[col] = df[col].fillna(method='ffill').fillna(method='bfill')
         else:
             # Linear interpolation for small gaps
             df[col] = df[col].interpolate(method='linear', limit=2)
             # For larger gaps, use average of forward and backward fill
             if df[col].isnull().any():
-                ffill = df[col].ffill()
-                bfill = df[col].bfill()
+                ffill = df[col].fillna(method='ffill')
+                bfill = df[col].fillna(method='bfill')
                 df[col] = (ffill + bfill) / 2
     
     # Verify no missing values remain
@@ -282,7 +291,7 @@ def combine_meteo_data(output_path: Optional[Path] = None) -> pd.DataFrame:
         expected_dates = pd.date_range(
             start=combined_df.index.min(),
             end=combined_df.index.max(),
-            freq='h'
+            freq='H'
         )
         missing_dates = expected_dates.difference(combined_df.index)
         if len(missing_dates) > 0:

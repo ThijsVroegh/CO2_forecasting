@@ -1,16 +1,15 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import datetime
-from pathlib import Path
 import numpy as np
-
 from autogluon.timeseries import TimeSeriesPredictor
+from sklearn.metrics import mean_squared_error, r2_score, root_mean_squared_error, mean_absolute_error, mean_absolute_percentage_error
+from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+
 import read_ned
 from train_model import gluonify, add_features
 from config import MODEL_DIR, HISTORICAL_DIR, TRAINING_DAYS
 
-from sklearn.metrics import mean_squared_error, r2_score, root_mean_squared_error, mean_absolute_error, mean_absolute_percentage_error
-from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 
 def load_test_data(use_full_context=False):
     """Load historical data as test set.

@@ -1,4 +1,3 @@
-import datetime
 from retrieve_ned import get_historical_data
 from config import DOWNLOADED_DIR, HISTORICAL_DIR
 

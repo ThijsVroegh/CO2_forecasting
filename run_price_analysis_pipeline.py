@@ -1,6 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
 """
 CO2 Emission Factor Price Analysis Pipeline
 
@@ -23,15 +20,13 @@ import os
 import sys
 import argparse
 import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
 from datetime import datetime
 import warnings
 
-# Import our modules
 try:
-    import price_analysis
-    from visualize_price_impact import main as visualize_main
+    from src.analysis import price_analysis
+    from src.visualization.visualize_price_impact import main as visualize_main
+
 except ImportError:
     print("Error: Required modules not found. Make sure price_analysis.py and visualize_price_impact.py exist.")
     sys.exit(1)
