@@ -1,7 +1,6 @@
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
-import numpy as np
 from scipy.stats import pearsonr
 
 # this script is used to analyze the correlation between the historical data on 

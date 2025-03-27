@@ -5,7 +5,6 @@ from retry_requests import retry
 from pathlib import Path
 from typing import Optional, Dict
 import datetime
-import pytz
 
 # def convert_to_nl_time(df: pd.DataFrame) -> pd.DataFrame:
 #     """Convert DataFrame index to Dutch local time format matching ned.nl data.
@@ -333,5 +332,5 @@ def combine_meteo_data(output_path: Optional[Path] = None) -> pd.DataFrame:
 
 if __name__ == "__main__":
     # When run as a script, combine the data and save it
-    output_path = Path("weather_meteo_combined.csv")
+    output_path = Path("data/meteoweather_meteo_combined.csv")
     df = combine_meteo_data(output_path) 

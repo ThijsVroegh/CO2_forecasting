@@ -1,12 +1,12 @@
-from pathlib import Path
 import datetime
-
 import pandas as pd
 from autogluon.timeseries import TimeSeriesPredictor
 
 import retrieve_ned
 from train_model import gluonify, add_features
 from config import MODEL_DIR, FORECAST_DIR, DOWNLOADED_DIR
+
+
 
 def predict():
     """Generate emission factor forecasts using the trained model.
