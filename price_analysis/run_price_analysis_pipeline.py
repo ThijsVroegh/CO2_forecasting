@@ -24,8 +24,8 @@ from datetime import datetime
 import warnings
 
 try:
-    from src.analysis import price_analysis
-    from src.visualization.visualize_price_impact import main as visualize_main
+    import price_analysis
+    from visualize_price_impact import main as visualize_main
 
 except ImportError:
     print("Error: Required modules not found. Make sure price_analysis.py and visualize_price_impact.py exist.")
