@@ -8,7 +8,6 @@ from autogluon.timeseries import TimeSeriesDataFrame, TimeSeriesPredictor
 from workalendar.europe import Netherlands, NetherlandsWithSchoolHolidays
 from autogluon.common import space
 from autogluon.timeseries.splitter import ExpandingWindowSplitter
-
 from meteo_utils import combine_meteo_data
 import read_ned
 from config import MODEL_DIR, HISTORICAL_DIR, TRAINING_DAYS
@@ -734,9 +733,10 @@ if __name__ == "__main__":
     data = ned_data
     data["item_id"] = 0
 
-    # Add features to data
-    data_with_features = add_features(data)
-
+    # Add features to data (no price data for the moment)
+    data_with_features = add_features(data,{'temporal', 'holiday', 'vacation', 'seasonal', 'emission', 'weather'})
+    
+    # Convert to AutoGluon format
     gluon_data = gluonify(data_with_features)
     train_data_back, test_data_back = gluon_data.train_test_split(prediction_length)
     
